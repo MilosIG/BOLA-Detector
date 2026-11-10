@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../BolaDetector.Domain/BolaDetector.Domain.csproj" />
+  </ItemGroup>
+</Project>

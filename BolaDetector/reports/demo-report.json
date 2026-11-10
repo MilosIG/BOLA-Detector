@@ -1,0 +1,134 @@
+{
+  "CreatedAt": "2026-11-10T10:19:15.4016477+00:00",
+  "Results": [
+    {
+      "ScenarioName": "alice: secureRead / doc-1",
+      "TestUser": "alice",
+      "ResourceId": "doc-1",
+      "Method": "GET",
+      "Path": "/secure/documents/doc-1",
+      "ExpectedAllowed": true,
+      "Response": {
+        "StatusCode": 200,
+        "BodyBytes": 86,
+        "Error": null
+      },
+      "Verdict": "NoViolationObserved",
+      "Explanation": "Authorized read matched the owner baseline.",
+      "Evidence": "Resource ID and protected fields matched."
+    },
+    {
+      "ScenarioName": "bob: secureRead / doc-1",
+      "TestUser": "bob",
+      "ResourceId": "doc-1",
+      "Method": "GET",
+      "Path": "/secure/documents/doc-1",
+      "ExpectedAllowed": false,
+      "Response": {
+        "StatusCode": 403,
+        "BodyBytes": 0,
+        "Error": null
+      },
+      "Verdict": "NoViolationObserved",
+      "Explanation": "Unauthorized read was rejected and no matching protected data was observed.",
+      "Evidence": "HTTP 403; verified owner baseline."
+    },
+    {
+      "ScenarioName": "alice: secureRead / doc-2",
+      "TestUser": "alice",
+      "ResourceId": "doc-2",
+      "Method": "GET",
+      "Path": "/secure/documents/doc-2",
+      "ExpectedAllowed": false,
+      "Response": {
+        "StatusCode": 403,
+        "BodyBytes": 0,
+        "Error": null
+      },
+      "Verdict": "NoViolationObserved",
+      "Explanation": "Unauthorized read was rejected and no matching protected data was observed.",
+      "Evidence": "HTTP 403; verified owner baseline."
+    },
+    {
+      "ScenarioName": "bob: secureRead / doc-2",
+      "TestUser": "bob",
+      "ResourceId": "doc-2",
+      "Method": "GET",
+      "Path": "/secure/documents/doc-2",
+      "ExpectedAllowed": true,
+      "Response": {
+        "StatusCode": 200,
+        "BodyBytes": 82,
+        "Error": null
+      },
+      "Verdict": "NoViolationObserved",
+      "Explanation": "Authorized read matched the owner baseline.",
+      "Evidence": "Resource ID and protected fields matched."
+    },
+    {
+      "ScenarioName": "alice: vulnerableRead / doc-1",
+      "TestUser": "alice",
+      "ResourceId": "doc-1",
+      "Method": "GET",
+      "Path": "/vulnerable/documents/doc-1",
+      "ExpectedAllowed": true,
+      "Response": {
+        "StatusCode": 200,
+        "BodyBytes": 86,
+        "Error": null
+      },
+      "Verdict": "NoViolationObserved",
+      "Explanation": "Authorized read matched the owner baseline.",
+      "Evidence": "Resource ID and protected fields matched."
+    },
+    {
+      "ScenarioName": "bob: vulnerableRead / doc-1",
+      "TestUser": "bob",
+      "ResourceId": "doc-1",
+      "Method": "GET",
+      "Path": "/vulnerable/documents/doc-1",
+      "ExpectedAllowed": false,
+      "Response": {
+        "StatusCode": 200,
+        "BodyBytes": 86,
+        "Error": null
+      },
+      "Verdict": "ConfirmedViolation",
+      "Explanation": "Unauthorized identity received the resource\u0027s protected fields verified against the owner response.",
+      "Evidence": "Resource ID and protected fields matched; SHA-256=30474BBF549A2BC0488B89CADA75166EE872A3D29BAF8F08F2626C14E58D198E. Response content omitted."
+    },
+    {
+      "ScenarioName": "alice: vulnerableRead / doc-2",
+      "TestUser": "alice",
+      "ResourceId": "doc-2",
+      "Method": "GET",
+      "Path": "/vulnerable/documents/doc-2",
+      "ExpectedAllowed": false,
+      "Response": {
+        "StatusCode": 200,
+        "BodyBytes": 82,
+        "Error": null
+      },
+      "Verdict": "ConfirmedViolation",
+      "Explanation": "Unauthorized identity received the resource\u0027s protected fields verified against the owner response.",
+      "Evidence": "Resource ID and protected fields matched; SHA-256=F8161EF9541550619E2D908843283E572EBEF976CFF2276262FA706C92453981. Response content omitted."
+    },
+    {
+      "ScenarioName": "bob: vulnerableRead / doc-2",
+      "TestUser": "bob",
+      "ResourceId": "doc-2",
+      "Method": "GET",
+      "Path": "/vulnerable/documents/doc-2",
+      "ExpectedAllowed": true,
+      "Response": {
+        "StatusCode": 200,
+        "BodyBytes": 82,
+        "Error": null
+      },
+      "Verdict": "NoViolationObserved",
+      "Explanation": "Authorized read matched the owner baseline.",
+      "Evidence": "Resource ID and protected fields matched."
+    }
+  ],
+  "Limitation": "Only the configured local operations and fixtures were tested; absence of findings does not prove API security."
+}

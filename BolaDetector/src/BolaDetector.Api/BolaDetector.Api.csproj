@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../BolaDetector.Application/BolaDetector.Application.csproj" />
+    <ProjectReference Include="../BolaDetector.Infrastructure/BolaDetector.Infrastructure.csproj" />
+    <ProjectReference Include="../BolaDetector.Engine/BolaDetector.Engine.csproj" />
+  </ItemGroup>
+</Project>

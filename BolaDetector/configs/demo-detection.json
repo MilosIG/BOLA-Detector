@@ -1,0 +1,69 @@
+{
+  "targetOrigin": "http://127.0.0.1:5081",
+  "timeoutSeconds": 5,
+  "identities": [
+    {
+      "name": "alice",
+      "identity": {
+        "id": "00000000-0000-0000-0000-00000000000a",
+        "organizationId": "00000000-0000-0000-0000-000000000001",
+        "role": "member",
+        "credentialReference": "env:ALICE_TEST_USER"
+      }
+    },
+    {
+      "name": "bob",
+      "identity": {
+        "id": "00000000-0000-0000-0000-00000000000b",
+        "organizationId": "00000000-0000-0000-0000-000000000001",
+        "role": "member",
+        "credentialReference": "env:BOB_TEST_USER"
+      }
+    }
+  ],
+  "resources": [
+    {
+      "id": "doc-1",
+      "ownerId": "00000000-0000-0000-0000-00000000000a",
+      "organizationId": "00000000-0000-0000-0000-000000000001",
+      "resourceType": "document"
+    },
+    {
+      "id": "doc-2",
+      "ownerId": "00000000-0000-0000-0000-00000000000b",
+      "organizationId": "00000000-0000-0000-0000-000000000001",
+      "resourceType": "document"
+    }
+  ],
+  "operations": [
+    {
+      "operation": {
+        "operationId": "secureRead",
+        "method": "GET",
+        "path": "/secure/documents/{id}"
+      },
+      "resourceType": "document",
+      "action": "read"
+    },
+    {
+      "operation": {
+        "operationId": "vulnerableRead",
+        "method": "GET",
+        "path": "/vulnerable/documents/{id}"
+      },
+      "resourceType": "document",
+      "action": "read"
+    }
+  ],
+  "rules": [
+    {
+      "resourceType": "document",
+      "action": "read",
+      "requireOwner": true,
+      "requireSameOrganization": true
+    }
+  ],
+  "protectedProperties": [
+    "title"
+  ]
+}

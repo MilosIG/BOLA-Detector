@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+.vs/
+.env
+**/appsettings.Local.json
+TestResults/
+*.user
+.tools/
+*.tsbuildinfo

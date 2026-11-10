@@ -1,0 +1,24 @@
+# Primjer ugovora; YAML loader i generator scenarija jos nisu implementirani.
+project: demo
+baseUrl: http://localhost:5081
+allowedTargetOrigins:
+  - http://localhost:5081
+organizations:
+  - id: org-a
+identities:
+  - id: alice
+    organization: org-a
+    credentialReference: env:ALICE_TOKEN
+  - id: bob
+    organization: org-a
+    credentialReference: env:BOB_TOKEN
+resources:
+  - id: doc-1
+    type: document
+    owner: alice
+    organization: org-a
+rules:
+  - resourceType: document
+    action: read
+    requireOwner: true
+    requireSameOrganization: true
