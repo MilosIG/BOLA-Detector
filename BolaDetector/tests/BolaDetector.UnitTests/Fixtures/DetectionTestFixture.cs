@@ -16,9 +16,9 @@ internal static class DetectionTestFixture
     public static TestScenario Scenario(DetectionConfiguration config) => new BolaScenarioGenerator(new AuthorizationOracle())
         .Generate(config).First(s => !s.ExpectedAllowed);
 
-    public static DetectionEngine CreateEngine(HttpClient client, DetectionConfiguration config) =>
-        new(new HttpScenarioRequestExecutor(client, new FixtureCredentials(), config, new LocalTargetAddressPolicy()),
-            new JsonReadEvidenceVerifier(config), TimeProvider.System);
+    public static DetectionEngine CreateEngine(HttpClient client) =>
+        new(new HttpScenarioRequestExecutor(client, new FixtureCredentials(), new LocalTargetAddressPolicy()),
+            new JsonReadEvidenceVerifier(), TimeProvider.System);
     public static HttpResponseMessage JsonResponse(string id) => new(HttpStatusCode.OK)
     { Content = new StringContent(JsonSerializer.Serialize(new { id, title = "private-test-content" })) };
     internal sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

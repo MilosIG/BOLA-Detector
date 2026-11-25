@@ -22,7 +22,7 @@ public class DetectionExecutionTests
             Assert.That(request.Method, Is.EqualTo(HttpMethod.Get));
             return Task.FromResult(JsonResponse(scenario.Resource.Id));
         }));
-        var result = await CreateEngine(client, config).ExecuteAsync(scenario, default);
+        var result = await CreateEngine(client).ExecuteAsync(scenario, ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(seen, Is.EqualTo(new[] { scenario.OwnerIdentity!.Id.ToString(), scenario.Identity!.Id.ToString() }));
         Assert.That(result.Result!.Verdict, Is.EqualTo(FindingVerdict.ConfirmedViolation));
         Assert.That(JsonSerializer.Serialize(result), Does.Not.Contain("private-test-content"));
@@ -33,7 +33,7 @@ public class DetectionExecutionTests
     {
         var config = Config();
         using var client = new HttpClient(new StubHandler((_, _) => throw new HttpRequestException("secret-must-not-leak")));
-        var result = await CreateEngine(client, config).ExecuteAsync(Scenario(config), default);
+        var result = await CreateEngine(client).ExecuteAsync(Scenario(config), ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(result.Status, Is.EqualTo(ExecutionStatus.Failed));
         Assert.That(result.Result!.Verdict, Is.EqualTo(FindingVerdict.LimitedVerification));
         Assert.That(JsonSerializer.Serialize(result), Does.Not.Contain("secret-must-not-leak"));
@@ -44,7 +44,7 @@ public class DetectionExecutionTests
         var config = Config(); var scenario = Scenario(config); var calls = 0;
         using var client = new HttpClient(new StubHandler((_, _) => Task.FromResult(++calls == 1
             ? new HttpResponseMessage(HttpStatusCode.Forbidden) : JsonResponse(scenario.Resource!.Id))));
-        var result = await CreateEngine(client, config).ExecuteAsync(scenario, default);
+        var result = await CreateEngine(client).ExecuteAsync(scenario, ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(result.Result!.Verdict, Is.EqualTo(FindingVerdict.LimitedVerification));
     }
     [Test]
@@ -53,7 +53,7 @@ public class DetectionExecutionTests
         var config = Config(); var scenario = Scenario(config); var calls = 0;
         using var client = new HttpClient(new StubHandler((_, _) => Task.FromResult(++calls == 1
             ? JsonResponse(scenario.Resource!.Id) : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"ok\":true}") })));
-        var result = await CreateEngine(client, config).ExecuteAsync(scenario, default);
+        var result = await CreateEngine(client).ExecuteAsync(scenario, ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(result.Result!.Verdict, Is.EqualTo(FindingVerdict.PotentialViolation));
     }
     [Test]
@@ -61,7 +61,7 @@ public class DetectionExecutionTests
     {
         var config = Config();
         using var client = new HttpClient(new StubHandler((_, _) => throw new TaskCanceledException()));
-        var result = await CreateEngine(client, config).ExecuteAsync(Scenario(config), default);
+        var result = await CreateEngine(client).ExecuteAsync(Scenario(config), ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(result.Result!.Response.Error, Is.EqualTo("Timeout"));
     }
     [Test]
@@ -69,8 +69,8 @@ public class DetectionExecutionTests
     {
         var config = Config(); using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
         using var client = new HttpClient(new StubHandler((_, ct) => { ct.ThrowIfCancellationRequested(); return Task.FromResult(JsonResponse("1")); }));
-        Assert.ThrowsAsync<OperationCanceledException>(async () => await CreateEngine(client, config)
-            .ExecuteAsync(Scenario(config), cancellation.Token));
+        Assert.ThrowsAsync<OperationCanceledException>(async () => await CreateEngine(client)
+            .ExecuteAsync(Scenario(config), ValidatedDetectionConfiguration.Create(config), cancellation.Token));
     }
 
     [TestCase("not-json")]
@@ -80,7 +80,7 @@ public class DetectionExecutionTests
     {
         var config = Config();
         using var client = new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) })));
-        var result = await CreateEngine(client, config).ExecuteAsync(Scenario(config), default);
+        var result = await CreateEngine(client).ExecuteAsync(Scenario(config), ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(result.Result!.Verdict, Is.EqualTo(FindingVerdict.LimitedVerification));
     }
     [Test]
@@ -88,7 +88,7 @@ public class DetectionExecutionTests
     {
         var config = Config();
         using var client = new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('x', 70000)) })));
-        var result = await CreateEngine(client, config).ExecuteAsync(Scenario(config), default);
+        var result = await CreateEngine(client).ExecuteAsync(Scenario(config), ValidatedDetectionConfiguration.Create(config), default);
         Assert.That(result.Result!.Response.Error, Is.EqualTo("ResponseTooLarge"));
         Assert.That(result.Result.Verdict, Is.EqualTo(FindingVerdict.LimitedVerification));
     }

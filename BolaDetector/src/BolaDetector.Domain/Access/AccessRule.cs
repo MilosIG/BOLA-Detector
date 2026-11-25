@@ -1,6 +1,6 @@
 namespace BolaDetector.Domain;
 
-public record AccessRule(string ResourceType, string Action, bool RequireOwner, bool RequireSameOrganization)
+public sealed record AccessRule(string ResourceType, string Action, bool RequireOwner, bool RequireSameOrganization)
 {
     public bool Allows(TestIdentity identity, TestResource resource) =>
         ResourceType == resource.ResourceType &&

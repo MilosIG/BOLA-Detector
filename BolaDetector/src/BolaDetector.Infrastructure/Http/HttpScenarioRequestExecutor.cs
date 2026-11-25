@@ -4,24 +4,25 @@ using BolaDetector.Domain;
 namespace BolaDetector.Infrastructure;
 
 public sealed class HttpScenarioRequestExecutor(HttpClient client, ITestCredentialProvider credentials,
-    DetectionConfiguration configuration, LocalTargetAddressPolicy targetPolicy) : IScenarioRequestExecutor
+    LocalTargetAddressPolicy targetPolicy) : IScenarioRequestExecutor
 {
     private const int MaximumBodyBytes = 64 * 1024;
 
     public async Task<ObservedResponse> ExecuteAsync(ApiOperation operation, TestResource resource,
-        TestIdentity identity, CancellationToken cancellationToken)
+        TestIdentity identity, ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
     {
         if (operation.Method != "GET") throw new ArgumentException("Only GET operations are supported.");
         var uri = targetPolicy.Build(configuration.TargetOrigin, operation.Path, resource.Id);
         if (configuration.TimeoutSeconds is < 1 or > 60) throw new ArgumentException("Timeout must be 1-60 seconds.");
-        var response = await SendAsync(uri, identity, cancellationToken);
+        var response = await SendAsync(uri, identity, configuration.TimeoutSeconds, cancellationToken);
         return new ObservedResponse(uri.AbsolutePath, response.Observation, response.Body);
     }
 
-    private async Task<(ResponseObservation Observation, string? Body)> SendAsync(Uri uri, TestIdentity identity, CancellationToken cancellationToken)
+    private async Task<(ResponseObservation Observation, string? Body)> SendAsync(Uri uri, TestIdentity identity,
+        int timeoutSeconds, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(configuration.TimeoutSeconds));
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);

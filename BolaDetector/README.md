@@ -27,6 +27,12 @@ dotnet run --project src/BolaDetector.Demo -- configs/demo-detection.json report
 
 Vrijednosti alice/bob su sintetički identiteti lokalnog API-ja. Kredencijali se razrješavaju iz `env:` reference tek pri zahtjevu i šalju u `X-Test-User`. Izvještaj ne čuva zaglavlja, kredencijale, sirovo tijelo odgovora niti izvorne poruke HTTP izuzetaka. Imena scenarija, korisnika, resursa i putanja u konfiguraciji moraju biti javni testni metapodaci bez tajni.
 
+Svako izvršavanje validira privatnu kopiju ulazne konfiguracije. Generator,
+izvršilac zahtjeva i verifikator koriste isti nepromjenljiv snimak sesije.
+Neispravan ulaz daje izlazni kod `1` uz kod greške i putanju do polja.
+[Pravila i kodovi validacije](docs/implementation-v3-configuration-validation.md).
+[Tok snimka i promjene ugovora](docs/architecture-audit.md#nepromjenljiv-snimak-konfiguracije-po-sesiji).
+
 Argumenti su opcioni: bez njih koriste se kopija konfiguracije uz program i `bola-report.json` u tekućem folderu. Izlazni folder se kreira automatski. Ctrl+C prekida rad. Izlazni kodovi: 0 završen verifikovan demo (može uključivati nalaze), 1 greška konfiguracije/izvještaja, 2 ograničena verifikacija ili HTTP greška, 130 otkazivanje.
 
 ## Lokalni CRUD dokumenata
@@ -90,7 +96,7 @@ tests/
     Architecture/ Authorization/ Execution/ Findings/ Fixtures/ Http/ Scenarios/
   BolaDetector.IntegrationTests/
     Detection/ Reporting/
-  BolaDetector.EndToEndTests/  # rezervisan projekat
+  BolaDetector.EndToEndTests/  # procesni NUnit testovi
 configs/
 reports/
 docs/
@@ -134,15 +140,21 @@ Stvarni izvještaj: [reports/demo-report.json](reports/demo-report.json).
 
 ## Provjere i ograničenja
 
-Domenski analizator podržava klasifikaciju već prikupljenih JSON snimaka za
-operacije izmjene. Opis interfejsa i rezultati provjera dostupni su u dokumentu
-[Analiza dokaza o izmjeni](docs/implementation-v2-write-detection.md).
+JSON adapter priprema dokaze iz već prikupljenih snimaka, a domenski
+analizator klasifikuje ishod. [Priprema dokaza i migracija ugovora](docs/architecture-audit.md#priprema-dokaza-i-domenska-klasifikacija).
 
-.NET rješenje se kompajlira i prolazi **47 jediničnih i 9 integracionih
+.NET rješenje se kompajlira i prolazi **80 jediničnih i 24 integraciona
 testova**. Integracioni testovi koriste stvarni ASP.NET pipeline preko
 TestServer-a i pokrivaju CRUD, vlasništvo, validaciju, nelokalne veze i
-postojeće ponašanje Read demonstracije. EndToEndTests je prazan rezervisani
-projekat.
+postojeće ponašanje Read demonstracije.
+
+Procesni E2E testovi pokrivaju autorizovani CRUD, autorizovani Read CLI i
+CLI grešku konfiguracije. Za Read CLI test treba slobodan loopback port
+`5081`. [Preduslovi, komande i čišćenje](tests/BolaDetector.EndToEndTests/README.md).
+
+[Arhitektonska revizija i dokazna matrica](docs/architecture-audit.md)
+navode granice validirane konfiguracije, preostala odstupanja i rezultate
+završne provjere.
 
 Detektor podržava čitanje u jednom koraku. CRUD operacije pripadaju lokalnom
 testnom API-ju. OpenAPI importer je sačuvan, ali demo koristi eksplicitne

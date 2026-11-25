@@ -1,5 +1,3 @@
-using BolaDetector.Domain;
-
 namespace BolaDetector.Application;
 
 public record DetectionReport(DateTimeOffset CreatedAt, IReadOnlyList<ScenarioResult> Results,

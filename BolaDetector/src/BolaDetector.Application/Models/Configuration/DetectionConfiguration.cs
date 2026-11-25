@@ -4,7 +4,7 @@ namespace BolaDetector.Application;
 
 public sealed class DetectionConfiguration
 {
-    public string TargetOrigin { get; init; } = "http://127.0.0.1:5081";
+    public string TargetOrigin { get; init; } = DetectionInputPolicy.LocalOrigin;
     public int TimeoutSeconds { get; init; } = 5;
     public List<ConfiguredIdentity> Identities { get; init; } = [];
     public List<TestResource> Resources { get; init; } = [];

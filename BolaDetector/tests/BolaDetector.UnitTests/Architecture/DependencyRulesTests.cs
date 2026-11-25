@@ -7,14 +7,31 @@ namespace BolaDetector.UnitTests;
 
 public class DependencyRulesTests
 {
-    [TestCase(typeof(AccessRule))]
-    [TestCase(typeof(RunDetection))]
-    [TestCase(typeof(DetectionEngine))]
-    public void InnerAssembliesDoNotReferenceInfrastructureOrFrameworks(Type representativeType)
+    [TestCase(typeof(AccessRule), new string[0])]
+    [TestCase(typeof(RunDetection), new[] { "BolaDetector.Domain" })]
+    [TestCase(typeof(DetectionEngine), new[] { "BolaDetector.Application", "BolaDetector.Domain" })]
+    public void InnerAssemblies_CompiledReferences_RespectLayerBoundaries(Type representativeType, string[] allowed)
     {
         var names = representativeType.Assembly.GetReferencedAssemblies().Select(a => a.Name!).ToArray();
-        Assert.That(names.Any(n => n.StartsWith("Microsoft.AspNetCore") || n.StartsWith("Microsoft.EntityFrameworkCore") ||
-            n.StartsWith("Microsoft.Extensions") || n.StartsWith("Microsoft.OpenApi") || n == "BolaDetector.Infrastructure"), Is.False);
+        var projectReferences = names.Where(name => name.StartsWith("BolaDetector.", StringComparison.Ordinal) ||
+            name == "BolaTestApi");
+        Assert.That(projectReferences, Is.SubsetOf(allowed));
+        Assert.That(names, Does.Not.Contain("System.Net.Http"));
+        Assert.That(names, Has.None.Matches<string>(name => name.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal) ||
+            name.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal) ||
+            name.StartsWith("Microsoft.Extensions", StringComparison.Ordinal) ||
+            name.StartsWith("Microsoft.OpenApi", StringComparison.Ordinal) ||
+            name.StartsWith("Pomelo.EntityFrameworkCore", StringComparison.Ordinal)));
+    }
+
+    [TestCase(typeof(FindingAnalyzer))]
+    [TestCase(typeof(RunDetection))]
+    [TestCase(typeof(DetectionEngine))]
+    public void InnerAssemblies_CompiledReferences_ExcludeJsonSerialization(Type representativeType)
+    {
+        var names = representativeType.Assembly.GetReferencedAssemblies().Select(reference => reference.Name);
+
+        Assert.That(names, Does.Not.Contain("System.Text.Json"));
     }
 
     [Test]
@@ -30,13 +47,17 @@ public class DependencyRulesTests
             ["BolaDetector.Engine"] = ["BolaDetector.Domain", "BolaDetector.Application"],
             ["BolaDetector.Infrastructure"] = ["BolaDetector.Domain", "BolaDetector.Application", "BolaDetector.Engine"],
             ["BolaDetector.Api"] = ["BolaDetector.Application", "BolaDetector.Infrastructure", "BolaDetector.Engine"],
-            ["BolaDetector.Demo"] = ["BolaDetector.Infrastructure"]
+            ["BolaDetector.Demo"] = ["BolaDetector.Application", "BolaDetector.Domain", "BolaDetector.Infrastructure"],
+            ["BolaTestApi"] = []
         };
+        var root = directory!.FullName;
         foreach (var (project, dependencies) in expected)
         {
-            var document = XDocument.Load(Path.Combine(directory!.FullName, "src", project, project + ".csproj"));
-            var references = document.Descendants("ProjectReference").Select(e => Path.GetFileNameWithoutExtension(e.Attribute("Include")!.Value)).ToArray();
-            Assert.That(references, Is.EquivalentTo(dependencies), project);
+            var path = GetProjectPath(root, project);
+            var document = XDocument.Load(path);
+            var references = document.Descendants("ProjectReference")
+                .Select(reference => Path.GetFullPath(reference.Attribute("Include")!.Value, Path.GetDirectoryName(path)!));
+            Assert.That(references, Is.EquivalentTo(dependencies.Select(dependency => GetProjectPath(root, dependency))), project);
             if (project is "BolaDetector.Domain" or "BolaDetector.Application" or "BolaDetector.Engine")
             {
                 Assert.That(document.Descendants("PackageReference"), Is.Empty, project);
@@ -44,4 +65,7 @@ public class DependencyRulesTests
             }
         }
     }
+
+    private static string GetProjectPath(string root, string project) =>
+        Path.Combine(root, project == "BolaTestApi" ? "targets" : "src", project, project + ".csproj");
 }

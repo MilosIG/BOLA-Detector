@@ -13,7 +13,7 @@ try
     // Composition root alone selects concrete file, transport and presentation adapters.
     IDetectionConfigurationLoader loader = new JsonDetectionConfigurationLoader();
     var configuration = await loader.LoadAsync(configPath, cancellation.Token);
-    var services = new ServiceCollection().AddBolaDetection(configuration);
+    var services = new ServiceCollection().AddBolaDetection();
     services.AddSingleton<TextWriter>(Console.Out);
     services.AddSingleton<ConsoleReportPresenter>();
     services.AddTransient<DetectionConsoleApplication>();
@@ -21,5 +21,13 @@ try
     return await provider.GetRequiredService<DetectionConsoleApplication>().RunAsync(configuration, outputPath, cancellation.Token);
 }
 catch (OperationCanceledException) { Console.Error.WriteLine("Detection cancelled."); return 130; }
+catch (ConfigurationValidationException exception)
+{
+    Console.Error.WriteLine("Configuration validation failed.");
+    foreach (var error in exception.Errors)
+        Console.Error.WriteLine($"[{error.Code}] {error.Path}: {error.Message}");
+    Console.Error.WriteLine("Execution aborted before scenario generation.");
+    return 1;
+}
 catch (Exception ex) when (ex is ArgumentException or IOException or JsonException or InvalidOperationException)
 { Console.Error.WriteLine($"Detection failed ({ex.GetType().Name}); verify configuration and local file permissions."); return 1; }

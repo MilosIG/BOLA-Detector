@@ -2,4 +2,4 @@ using BolaDetector.Domain;
 
 namespace BolaDetector.Application;
 
-public record ConfiguredIdentity(string Name, TestIdentity Identity);
+public sealed record ConfiguredIdentity(string Name, TestIdentity Identity);

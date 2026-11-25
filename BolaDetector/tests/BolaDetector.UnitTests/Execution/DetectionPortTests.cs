@@ -11,10 +11,11 @@ public class DetectionPortTests
     [TestCase(true, FindingVerdict.LimitedVerification)]
     public async Task EngineAcceptsAlternativeTransportWithoutHttpOrJson(bool unavailable, FindingVerdict expected)
     {
-        var scenario = Scenario(Config());
+        var configuration = Config();
+        var scenario = Scenario(configuration);
         var transport = new InMemoryReadExecutor(unavailable);
         var engine = new DetectionEngine(transport, new FixtureEvidenceVerifier(), TimeProvider.System);
-        var execution = await engine.ExecuteAsync(scenario, default);
+        var execution = await engine.ExecuteAsync(scenario, ValidatedDetectionConfiguration.Create(configuration), default);
         Assert.That(execution.Result!.Verdict, Is.EqualTo(expected));
         Assert.That(transport.Identities, Is.EqualTo(new[] { scenario.OwnerIdentity!.Id, scenario.Identity!.Id }));
         Assert.That(execution.Finding is not null, Is.EqualTo(!unavailable));
@@ -34,6 +35,24 @@ public class DetectionPortTests
     }
 
     [Test]
+    public async Task ExecuteAsync_WhenSessionRuns_PassesSameSnapshotToGeneratorTransportAndVerifier()
+    {
+        var configuration = Config();
+        var generator = new SingleScenarioGenerator(Scenario(configuration));
+        var transport = new InMemoryReadExecutor(false);
+        var verifier = new FixtureEvidenceVerifier();
+        var runner = new RunDetection(generator, new DetectionEngine(transport, verifier, new FixedClock()), new FixedClock());
+
+        await runner.ExecuteAsync(configuration, default);
+
+        Assert.That(generator.Snapshot, Is.Not.Null);
+        Assert.That(transport.Snapshots, Has.Count.EqualTo(2));
+        Assert.That(transport.Snapshots[0], Is.SameAs(generator.Snapshot));
+        Assert.That(transport.Snapshots[1], Is.SameAs(generator.Snapshot));
+        Assert.That(verifier.Snapshot, Is.SameAs(generator.Snapshot));
+    }
+
+    [Test]
     public void UseCasePropagatesCallerCancellation()
     {
         var configuration = Config();
@@ -44,22 +63,40 @@ public class DetectionPortTests
     }
 
     private sealed class SingleScenarioGenerator(TestScenario scenario) : IScenarioGenerator
-    { public IReadOnlyList<TestScenario> Generate(DetectionConfiguration configuration) => [scenario]; }
+    {
+        public ValidatedDetectionConfiguration? Snapshot { get; private set; }
+
+        public IReadOnlyList<TestScenario> Generate(ValidatedDetectionConfiguration configuration)
+        {
+            Snapshot = configuration;
+            return [scenario];
+        }
+    }
     private sealed class InMemoryReadExecutor(bool unavailable) : IScenarioRequestExecutor
     {
         public List<Guid> Identities { get; } = [];
-        public Task<ObservedResponse> ExecuteAsync(ApiOperation operation, TestResource resource, TestIdentity identity, CancellationToken cancellationToken)
+        public List<ValidatedDetectionConfiguration> Snapshots { get; } = [];
+
+        public Task<ObservedResponse> ExecuteAsync(ApiOperation operation, TestResource resource, TestIdentity identity,
+            ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Identities.Add(identity.Id);
+            Snapshots.Add(configuration);
             return Task.FromResult(new ObservedResponse("/fixture/" + resource.Id,
                 unavailable ? new(null, 0, "HttpRequestFailed") : new(200, 10, null), unavailable ? null : "protected-data"));
         }
     }
     private sealed class FixtureEvidenceVerifier : IReadEvidenceVerifier
     {
-        public ReadEvidence Verify(string resourceId, ObservedResponse baseline, ObservedResponse actual) =>
-            new(baseline.Observation.Error is null, baseline.Body is not null && baseline.Body == actual.Body, "fixture-fingerprint");
+        public ValidatedDetectionConfiguration? Snapshot { get; private set; }
+
+        public ReadEvidence Verify(string resourceId, ObservedResponse baseline, ObservedResponse actual,
+            ValidatedDetectionConfiguration configuration)
+        {
+            Snapshot = configuration;
+            return new(baseline.Observation.Error is null, baseline.Body is not null && baseline.Body == actual.Body, "fixture-fingerprint");
+        }
     }
     private sealed class FixedClock : TimeProvider
     { public override DateTimeOffset GetUtcNow() => new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero); }

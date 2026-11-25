@@ -4,21 +4,23 @@ using System.Text.Json;
 using BolaDetector.Application;
 namespace BolaDetector.Infrastructure;
 
-public sealed class JsonReadEvidenceVerifier(DetectionConfiguration configuration) : IReadEvidenceVerifier
+public sealed class JsonReadEvidenceVerifier : IReadEvidenceVerifier
 {
-    public ReadEvidence Verify(string resourceId, ObservedResponse baseline, ObservedResponse actual)
+    public ReadEvidence Verify(string resourceId, ObservedResponse baseline, ObservedResponse actual,
+        ValidatedDetectionConfiguration configuration)
     {
-        if (configuration.ProtectedProperties.Count == 0 || configuration.ProtectedProperties.Any(p => p == "id" || string.IsNullOrWhiteSpace(p)))
+        if (configuration.ProtectedProperties is not { Count: > 0 } ||
+            configuration.ProtectedProperties.Any(property => !DetectionInputPolicy.IsProtectedProperty(property)))
             throw new ArgumentException("At least one protected property other than id is required.");
-        var expected = Project(baseline.Body, resourceId);
-        var received = Project(actual.Body, resourceId);
+        var expected = Project(baseline.Body, resourceId, configuration.ProtectedProperties);
+        var received = Project(actual.Body, resourceId, configuration.ProtectedProperties);
         var verified = baseline.Observation.Error is null && baseline.Observation.StatusCode is >= 200 and < 300 && expected is not null;
         var matched = verified && actual.Observation.Error is null && received == expected;
         var fingerprint = matched ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(expected!))) : null;
         return new ReadEvidence(verified, matched, fingerprint);
     }
 
-    private string? Project(string? body, string resourceId)
+    private static string? Project(string? body, string resourceId, IReadOnlyList<string> protectedProperties)
     {
         if (body is null) return null;
         try
@@ -28,7 +30,7 @@ public sealed class JsonReadEvidenceVerifier(DetectionConfiguration configuratio
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() != resourceId)
                 return null;
             var values = new List<string> { id.GetRawText() };
-            foreach (var property in configuration.ProtectedProperties.Order(StringComparer.Ordinal))
+            foreach (var property in protectedProperties.Order(StringComparer.Ordinal))
             {
                 if (!root.TryGetProperty(property, out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ||
                     (value.ValueKind == JsonValueKind.String && string.IsNullOrEmpty(value.GetString()))) return null;

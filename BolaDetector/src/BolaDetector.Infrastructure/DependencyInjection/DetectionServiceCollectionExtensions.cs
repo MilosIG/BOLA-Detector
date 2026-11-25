@@ -6,9 +6,8 @@ namespace BolaDetector.Infrastructure;
 
 public static class DetectionServiceCollectionExtensions
 {
-    public static IServiceCollection AddBolaDetection(this IServiceCollection services, DetectionConfiguration configuration)
+    public static IServiceCollection AddBolaDetection(this IServiceCollection services)
     {
-        services.AddSingleton(configuration);
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IAuthorizationOracle, AuthorizationOracle>();
         services.AddSingleton<IScenarioGenerator, BolaScenarioGenerator>();

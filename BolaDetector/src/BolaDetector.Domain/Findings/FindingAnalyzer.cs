@@ -1,34 +1,24 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
-
 namespace BolaDetector.Domain;
 
 public static class FindingAnalyzer
 {
-    public static FindingVerdict Analyze(bool expectedAllowed, int statusCode, ResourceSnapshot before, ResourceSnapshot after)
+    public static FindingVerdict Analyze(bool expectedAllowed, int statusCode, SnapshotComparison comparison)
     {
         if (expectedAllowed) return FindingVerdict.NoViolationObserved;
-        if (!before.IsReadable || !after.IsReadable || before.Content is null || after.Content is null || before.ResourceId != after.ResourceId) return FindingVerdict.LimitedVerification;
-        if (before.Content != after.Content) return FindingVerdict.ConfirmedViolation;
+        if (comparison == SnapshotComparison.Unavailable) return FindingVerdict.LimitedVerification;
+        if (comparison == SnapshotComparison.Different) return FindingVerdict.ConfirmedViolation;
         return statusCode is >= 200 and < 300
             ? FindingVerdict.PotentialViolation : FindingVerdict.NoViolationObserved;
     }
 
     public static FindingAnalysis AnalyzeRecordedWrite(bool expectedAllowed, int? statusCode,
-        string resourceId, ResourceSnapshot before, ResourceSnapshot after,
-        string protectedField, JsonNode? intendedValue)
+        RecordedWriteEvidence evidence)
     {
-        var initial = ReadRecordedState(before, resourceId);
-        var final = ReadRecordedState(after, resourceId);
-        if (initial is null || final is null ||
-            !initial.TryGetPropertyValue(protectedField, out var initialValue) ||
-            !final.TryGetPropertyValue(protectedField, out var finalValue))
+        if (evidence == RecordedWriteEvidence.Unavailable)
             return new(FindingVerdict.LimitedVerification, "Recorded protected state could not be verified.",
                 "A snapshot was unavailable, invalid, or missing the protected field for the resource.");
 
-        var intendedChange = !JsonNode.DeepEquals(initialValue, intendedValue) &&
-            JsonNode.DeepEquals(finalValue, intendedValue);
-        if (intendedChange)
+        if (evidence == RecordedWriteEvidence.IntendedChange)
             return new(expectedAllowed ? FindingVerdict.NoViolationObserved : FindingVerdict.ConfirmedViolation,
                 expectedAllowed ? "The expected authorized change was observed." : "The denied identity's intended change was observed.",
                 "The final protected value matched the intended value and differed from the baseline.");
@@ -37,7 +27,7 @@ public static class FindingAnalyzer
             return new(FindingVerdict.LimitedVerification, "The expected authorized change could not be verified.",
                 "The recorded state did not demonstrate the intended change.");
 
-        if (JsonNode.DeepEquals(initial, final) && statusCode is 401 or 403 or 404)
+        if (evidence == RecordedWriteEvidence.Unchanged && statusCode is 401 or 403 or 404)
             return new(FindingVerdict.NoViolationObserved, "The request was rejected and recorded state was unchanged.",
                 "The baseline and final snapshots were semantically equal.");
 
@@ -47,38 +37,6 @@ public static class FindingAnalyzer
 
         return new(FindingVerdict.LimitedVerification, "The recorded result was inconclusive.",
             "The response and snapshots did not establish either rejection with unchanged state or the intended change.");
-    }
-
-    private static JsonObject? ReadRecordedState(ResourceSnapshot snapshot, string resourceId)
-    {
-        if (!snapshot.IsReadable || snapshot.Content is null || snapshot.ResourceId != resourceId)
-            return null;
-
-        try
-        {
-            var state = JsonNode.Parse(snapshot.Content) as JsonObject;
-            // Materialize nested objects so duplicate properties are rejected before comparison.
-            ValidateRecordedState(state);
-            return state;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-    }
-
-    private static void ValidateRecordedState(JsonNode? node)
-    {
-        if (node is JsonObject obj)
-            foreach (var property in obj)
-                ValidateRecordedState(property.Value);
-        else if (node is JsonArray array)
-            foreach (var element in array)
-                ValidateRecordedState(element);
     }
 
     public static FindingAnalysis AnalyzeRead(bool expectedAllowed, int? statusCode,

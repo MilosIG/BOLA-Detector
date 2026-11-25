@@ -1,5 +1,8 @@
 # Analiza dokaza o izmjeni
 
+Ovaj dokument bilježi prvobitni ugovor. Aktuelna migracija pozivalaca
+opisana je u [arhitektonskoj reviziji](architecture-audit.md#priprema-dokaza-i-domenska-klasifikacija).
+
 `FindingAnalyzer.AnalyzeRecordedWrite` prima očekivanu dozvolu, HTTP status,
 identifikator resursa, početni i završni snimak, naziv zaštićenog polja i očekivanu
 JSON vrijednost. Pozivalac dostavlja snimke i potvrđuje da pripadaju resursu.

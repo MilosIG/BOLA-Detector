@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../BolaDetector.Application/BolaDetector.Application.csproj" />
+    <ProjectReference Include="../BolaDetector.Domain/BolaDetector.Domain.csproj" />
     <ProjectReference Include="../BolaDetector.Infrastructure/BolaDetector.Infrastructure.csproj" />
     <None Include="../../configs/demo-detection.json" Link="demo-detection.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

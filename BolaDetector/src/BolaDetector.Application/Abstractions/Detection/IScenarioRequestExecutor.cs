@@ -6,5 +6,5 @@ namespace BolaDetector.Application;
 public interface IScenarioRequestExecutor
 {
     Task<ObservedResponse> ExecuteAsync(ApiOperation operation, TestResource resource,
-        TestIdentity identity, CancellationToken cancellationToken);
+        TestIdentity identity, ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken);
 }

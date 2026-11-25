@@ -3,5 +3,5 @@ namespace BolaDetector.Application;
 
 public interface IScenarioGenerator
 {
-    IReadOnlyList<TestScenario> Generate(DetectionConfiguration configuration);
+    IReadOnlyList<TestScenario> Generate(ValidatedDetectionConfiguration configuration);
 }
