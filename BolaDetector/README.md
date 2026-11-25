@@ -29,6 +29,39 @@ Vrijednosti alice/bob su sintetički identiteti lokalnog API-ja. Kredencijali se
 
 Argumenti su opcioni: bez njih koriste se kopija konfiguracije uz program i `bola-report.json` u tekućem folderu. Izlazni folder se kreira automatski. Ctrl+C prekida rad. Izlazni kodovi: 0 završen verifikovan demo (može uključivati nalaze), 1 greška konfiguracije/izvještaja, 2 ograničena verifikacija ili HTTP greška, 130 otkazivanje.
 
+## Lokalni CRUD dokumenata
+
+Pokreni `BolaTestApi` direktno na `127.0.0.1:5081` prema komandi iznad. CRUD
+rute prihvataju direktne loopback veze i jedno zaglavlje `X-Test-User` sa
+vrijednošću `alice` ili `bob`. Docker bridge nije podržan za ove rute.
+
+| Metoda i ruta | Zahtjev | Uspjeh |
+| --- | --- | --- |
+| `POST /documents` | JSON `{"title":"Novi dokument"}` | `201 Created`, dokument i `Location` |
+| `GET /documents/{id}` | Identitet vlasnika | `200 OK` i dokument |
+| `PUT /documents/{id}` | Identitet vlasnika i JSON `{"title":"Izmijenjen naslov"}` | `204 No Content` |
+| `DELETE /documents/{id}` | Identitet vlasnika | `204 No Content` |
+
+API generiše identifikator i dodjeljuje vlasnika iz zaglavlja. Naslov nakon
+uklanjanja okolnih razmaka mora imati 1–200 znakova. Neispravan unos daje
+`400`, nedostajući ili nepoznat identitet `401`, tuđi dokument ili nelokalna
+veza `403`, a nepoznat identifikator `404`.
+
+```powershell
+$headers = @{ 'X-Test-User' = 'alice' }
+$baseUri = 'http://127.0.0.1:5081'
+$document = Invoke-RestMethod -Method Post -Uri "$baseUri/documents" -Headers $headers `
+  -ContentType 'application/json' -Body (@{ title = 'Novi dokument' } | ConvertTo-Json)
+$uri = "$baseUri/documents/$($document.id)"
+Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+Invoke-RestMethod -Method Put -Uri $uri -Headers $headers `
+  -ContentType 'application/json' -Body (@{ title = 'Izmijenjen naslov' } | ConvertTo-Json)
+Invoke-RestMethod -Method Delete -Uri $uri -Headers $headers
+```
+
+CRUD dokumenti postoje u memoriji do brisanja ili ponovnog pokretanja API-ja.
+Rute Read demonstracije koriste zasebne početne dokumente `doc-1` i `doc-2`.
+
 ## Raspored projekta
 
 ```text
@@ -101,9 +134,20 @@ Stvarni izvještaj: [reports/demo-report.json](reports/demo-report.json).
 
 ## Provjere i ograničenja
 
-Poslije refaktorisanja prolazi **37 jediničnih i 2 integraciona testa**, kao i .NET i React build. Arhitektonski testovi čuvaju smjer referenci i nezavisnost jezgra od frameworka. Testovi portova izvršavaju use-case bez HTTP-a/JSON-a i provjeravaju zamjenljivost saradnika. Ostali testovi provjeravaju kombinacije, vlasništvo, status, dokaz, greške, otkazivanje, ograničenje odgovora i zapis JSON izvještaja. Integracioni test pokreće pravi ASP.NET pipeline preko TestServer-a. EndToEndTests je prazan rezervisani projekat.
+Domenski analizator podržava klasifikaciju već prikupljenih JSON snimaka za
+operacije izmjene. Opis interfejsa i rezultati provjera dostupni su u dokumentu
+[Analiza dokaza o izmjeni](docs/implementation-v2-write-detection.md).
 
-Nema mutacija, višekoračnih scenarija, replay/minimizacije, trajnog čuvanja nalaza ni pozadinskog reda. OpenAPI importer je sačuvan, ali demo koristi eksplicitne operacije iz JSON-a. YAML fajlovi su primjeri budućeg ugovora bez loadera. Testni header nije produkciona autentikacija. Naredna faza: izmjene uz nezavisne snimke i obnavljanje testnih podataka.
+.NET rješenje se kompajlira i prolazi **47 jediničnih i 9 integracionih
+testova**. Integracioni testovi koriste stvarni ASP.NET pipeline preko
+TestServer-a i pokrivaju CRUD, vlasništvo, validaciju, nelokalne veze i
+postojeće ponašanje Read demonstracije. EndToEndTests je prazan rezervisani
+projekat.
+
+Detektor podržava čitanje u jednom koraku. CRUD operacije pripadaju lokalnom
+testnom API-ju. OpenAPI importer je sačuvan, ali demo koristi eksplicitne
+operacije iz JSON-a. YAML fajlovi su primjeri budućeg ugovora bez loadera.
+Testni header predstavlja sintetički identitet lokalne aplikacije.
 
 ## Ostali dijelovi šablona
 

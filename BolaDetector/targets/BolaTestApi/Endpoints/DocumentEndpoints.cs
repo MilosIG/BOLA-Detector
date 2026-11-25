@@ -19,6 +19,7 @@ public static class DocumentEndpoints
             if (request.Headers["X-Test-User"] != document.Owner) return Results.StatusCode(403);
             return Results.Ok(document);
         });
+        endpoints.MapDocumentCrudEndpoints();
         return endpoints;
     }
 }
