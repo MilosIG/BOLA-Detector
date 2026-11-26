@@ -62,3 +62,6 @@ lokalnim testnim API-jem. [Dokumentacija sekvenci](implementation-v4-multi-step-
 Registar životnog ciklusa proširuje iste provjere izolacijom po izvršavanju,
 nepromjenljivim rezultatima i evidencijom potvrđenih i neizvjesnih ishoda.
 [Dokumentacija životnog ciklusa](implementation-v5-1-resource-lifecycle-modeling.md).
+Korelacija kreiranja proširuje provjeru izolacije kroz lokalni API i
+provjeru dokaza prije čišćenja.
+[Provjere oporavka](implementation-v5-2-reliable-creation-and-cleanup.md).

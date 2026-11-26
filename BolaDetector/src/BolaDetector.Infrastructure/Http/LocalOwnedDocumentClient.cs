@@ -5,8 +5,8 @@ using BolaDetector.Application;
 
 namespace BolaDetector.Infrastructure;
 
-public sealed class LocalOwnedDocumentClient(HttpClient client, ITestCredentialProvider credentials,
-    LocalTargetAddressPolicy targetPolicy) : IOwnedDocumentClient
+public sealed partial class LocalOwnedDocumentClient(HttpClient client, ITestCredentialProvider credentials,
+    LocalTargetAddressPolicy targetPolicy) : ICorrelatedDocumentClient
 {
     private const string DocumentRoute = "/documents/{id}";
     private const string LocationPrefix = "/documents/";
@@ -101,18 +101,9 @@ public sealed class LocalOwnedDocumentClient(HttpClient client, ITestCredentialP
     private static async Task<DocumentOperationResult> ReadStateAsync(Guid id, HttpContent content,
         CancellationToken cancellationToken)
     {
-        using var stream = await content.ReadAsStreamAsync(cancellationToken);
-        using var buffer = new MemoryStream();
-        var bytes = new byte[4096];
-        int count;
-        while ((count = await stream.ReadAsync(bytes, cancellationToken)) > 0)
-        {
-            if (buffer.Length + count > MaximumBodyBytes)
-                return new(DocumentOperationOutcome.Failed, "ResponseTooLarge");
-            buffer.Write(bytes, 0, count);
-        }
-
-        using var json = JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, (int)buffer.Length));
+        using var json = await ReadBoundedJsonAsync(content, cancellationToken);
+        if (json is null)
+            return new(DocumentOperationOutcome.Failed, "ResponseTooLarge");
         var root = json.RootElement;
         if (root.ValueKind != JsonValueKind.Object ||
             !root.TryGetProperty("id", out var documentId) || documentId.ValueKind != JsonValueKind.String ||
@@ -129,5 +120,21 @@ public sealed class LocalOwnedDocumentClient(HttpClient client, ITestCredentialP
             Organization = organization,
             OrganizationId = organization == "org-a" ? LocalOrganizationId : null
         });
+    }
+
+    private static async Task<JsonDocument?> ReadBoundedJsonAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var bytes = new byte[4096];
+        int count;
+        while ((count = await stream.ReadAsync(bytes, cancellationToken)) > 0)
+        {
+            if (buffer.Length + count > MaximumBodyBytes)
+                return null;
+            buffer.Write(bytes, 0, count);
+        }
+
+        return JsonDocument.Parse(buffer.ToArray());
     }
 }

@@ -1,5 +1,9 @@
 # Revizija arhitekture i kvaliteta BOLA Detector-a
 
+Faza 5.2 dokumentuje opcioni port oporavka, granicu lokalnog API-ja i
+zajednički rok oporavka i čišćenja.
+[Pouzdano kreiranje i čišćenje](implementation-v5-2-reliable-creation-and-cleanup.md).
+
 Revizija od 25. novembra 2026. obuhvata commit `80768b7`, postojeće radne
 izmjene i centralizovanu validaciju iz trećeg inkrementa. Kriterijumi su
 preuzeti iz zadatka. Numerisane prezentacije 1–13

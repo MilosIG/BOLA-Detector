@@ -85,6 +85,10 @@ JSON sadrži i `Lifecycle` sa očekivanim i opaženim vlasništvom, istorijom
 koraka, potvrdom brisanja i preostalim obavezama čišćenja.
 [Model životnog ciklusa i ograničenja](docs/implementation-v5-1-resource-lifecycle-modeling.md).
 
+Lokalni API podržava oporavak poslije izgubljenog Create odgovora putem
+ključa ograničenog na vlasnika i namjeru kreiranja.
+[Pouzdano kreiranje i čišćenje](docs/implementation-v5-2-reliable-creation-and-cleanup.md).
+
 ## Raspored projekta
 
 ```text

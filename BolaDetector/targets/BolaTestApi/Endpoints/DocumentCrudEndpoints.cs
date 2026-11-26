@@ -6,6 +6,7 @@ namespace BolaTestApi.Endpoints;
 internal static class DocumentCrudEndpoints
 {
     private const string IdentityHeader = "X-Test-User";
+    private const string CreationKeyHeader = "X-Creation-Key";
     private const int MaximumTitleLength = 200;
 
     public static void MapDocumentCrudEndpoints(this IEndpointRouteBuilder endpoints)
@@ -18,8 +19,24 @@ internal static class DocumentCrudEndpoints
             var title = ValidatedTitle(input);
             if (title is null) return InvalidTitle();
 
+            if (request.Headers.TryGetValue(CreationKeyHeader, out var keys))
+            {
+                if (keys.Count != 1 || !Guid.TryParseExact(keys[0], "N", out var key) || key == Guid.Empty)
+                    return Results.BadRequest();
+                var (record, conflict, deleted) = store.CreateCorrelated(Owner(request), key, title);
+                if (conflict) return Results.Conflict();
+                if (deleted) return Results.StatusCode(410);
+                return Results.Created($"/documents/{record.Id}", record);
+            }
+
             var document = store.Create(Owner(request), title);
             return Results.Created($"{request.PathBase}/documents/{document.Id}", document);
+        });
+        routes.MapGet("/creations/{key:guid}", (Guid key, HttpRequest request, TestDocumentStore store) =>
+        {
+            var (record, deleted) = store.Recover(Owner(request), key);
+            if (record is null) return Results.NoContent();
+            return Results.Json(record, statusCode: deleted ? 410 : 200);
         });
         routes.MapGet("/{id}", (string id, HttpRequest request, TestDocumentStore store) =>
         {

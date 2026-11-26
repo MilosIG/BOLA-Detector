@@ -16,6 +16,50 @@ namespace BolaDetector.IntegrationTests;
 
 public class DocumentCrudTests
 {
+    [Test]
+    public async Task CorrelatedCreate_WhenConcurrentOrRepeated_UsesOneOwnerScopedIntentAndRetainsTombstone()
+    {
+        await using var factory = CreateFactory(IPAddress.Loopback);
+        using var alice = CreateClient(factory, "alice");
+        using var bob = CreateClient(factory, "bob");
+        var key = Guid.NewGuid().ToString("N");
+        alice.DefaultRequestHeaders.Add("X-Creation-Key", key);
+        bob.DefaultRequestHeaders.Add("X-Creation-Key", key);
+
+        var calls = await Task.WhenAll(alice.PostAsJsonAsync("/documents", new { title = "Original" }),
+            alice.PostAsJsonAsync("/documents", new { title = " Original " }));
+        using var first = calls[0];
+        using var repeated = calls[1];
+        var path = first.Headers.Location!;
+        Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        Assert.That(repeated.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        Assert.That(repeated.Headers.Location, Is.EqualTo(path));
+        using var hidden = await bob.GetAsync($"/documents/creations/{key}");
+        Assert.That(hidden.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        using var other = await bob.PostAsJsonAsync("/documents", new { title = "Original", owner = "alice" });
+        var otherPath = other.Headers.Location!;
+        Assert.That(other.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        Assert.That(otherPath, Is.Not.EqualTo(path));
+
+        using var changed = await alice.PutAsJsonAsync(path, new { title = "Changed" });
+        using var equivalent = await alice.PostAsJsonAsync("/documents", new { title = "Original" });
+        using var conflict = await alice.PostAsJsonAsync("/documents", new { title = "Changed" });
+        Assert.That(changed.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That(equivalent.Headers.Location, Is.EqualTo(path));
+        Assert.That(conflict.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That((await alice.GetFromJsonAsync<TestDocument>(path))?.Title, Is.EqualTo("Changed"));
+
+        using var deleted = await alice.DeleteAsync(path);
+        using var replayAfterDelete = await alice.PostAsJsonAsync("/documents", new { title = "Original" });
+        using var tombstone = await alice.GetAsync($"/documents/creations/{key}");
+        using var missing = await alice.GetAsync(path);
+        Assert.That(deleted.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That(replayAfterDelete.StatusCode, Is.EqualTo(HttpStatusCode.Gone));
+        Assert.That(tombstone.StatusCode, Is.EqualTo(HttpStatusCode.Gone));
+        Assert.That(missing.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That((await bob.GetFromJsonAsync<TestDocument>(otherPath))?.Owner, Is.EqualTo("bob"));
+    }
+
     [TestCase(false)]
     [TestCase(true)]
     public async Task DocumentSequencesUseIsolatedResourcesAndCleanUp(bool failVerification)
@@ -59,7 +103,7 @@ public class DocumentCrudTests
             Assert.That(resource.ObservedOwnership, Is.EqualTo(new ObservedDocumentOwnership("alice", "org-a",
                 resource.ExpectedOwnership.OrganizationId, true, true)));
             Assert.That(resource.DeletionAcknowledged, Is.True);
-            Assert.That(resource.AbsenceVerified, Is.EqualTo(!failVerification));
+            Assert.That(resource.AbsenceVerified, Is.True);
             Assert.That(lifecycle.HasUnresolvedCleanup, Is.False);
             Assert.That(lifecycle.History.Select(item => item.Order), Is.EqualTo(Enumerable.Range(1, lifecycle.History.Length)));
             Assert.That(lifecycle.History.Where(item => item.Kind == LifecycleEventKind.StepResult).Select(item => item.StepId),
@@ -89,11 +133,16 @@ public class DocumentCrudTests
         Assert.That(await observer.GetFromJsonAsync<TestDocument>("/secure/documents/doc-1"), Is.EqualTo(originalFixture));
     }
 
-    [Test]
-    public async Task DocumentSequence_WhenCreateResponseIsLost_ReportsUnresolvedCleanupWithoutAnotherRequest()
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task DocumentSequence_WhenCreateResponseIsLost_UsesOnlyVerifiedRecovery(bool loseRecovery)
     {
         await using var factory = CreateFactory(IPAddress.Loopback);
-        using var client = factory.CreateDefaultClient(new LoseCreateResponse());
+        var handler = new LoseCreateResponse(loseRecovery);
+        using var client = factory.CreateDefaultClient(handler);
+        using var observer = CreateClient(factory, "alice");
+        using var unrelated = await observer.PostAsJsonAsync("/documents", new { title = "Unrelated" });
+        var unrelatedPath = unrelated.Headers.Location!;
         var configuration = await LoadSequenceConfigurationAsync();
         var executor = new DocumentSequenceExecutor(new LocalOwnedDocumentClient(client, new AliceCredential(),
             new LocalTargetAddressPolicy()));
@@ -108,14 +157,22 @@ public class DocumentCrudTests
         Assert.That(result.Succeeded, Is.False);
         Assert.That(result.Steps[0].Error, Is.EqualTo("CreateUnconfirmed"));
         Assert.That(result.Steps[1].Outcome, Is.EqualTo(SequenceStepOutcome.Skipped));
-        Assert.That(result.Cleanup, Is.Empty);
         var lifecycle = result.Lifecycle!;
         var resource = lifecycle.Resources.Single();
-        Assert.That(lifecycle.HasUnresolvedCleanup, Is.True);
-        Assert.That(resource.CleanupStatus, Is.EqualTo(ResourceCleanupStatus.UnresolvedCreation));
-        Assert.That(resource.DocumentId, Is.Null);
+        Assert.That(lifecycle.HasUnresolvedCleanup, Is.EqualTo(loseRecovery));
+        Assert.That(resource.CreationKey.ToString("N"), Is.EqualTo(handler.Key));
+        Assert.That(resource.CreationRecovered, Is.EqualTo(!loseRecovery));
+        Assert.That(resource.DocumentId, Is.EqualTo(loseRecovery ? (Guid?)null : Guid.Parse(handler.CommittedPath!["/documents/".Length..])));
+        Assert.That(resource.CleanupStatus, Is.EqualTo(loseRecovery ? ResourceCleanupStatus.UnresolvedCreation : ResourceCleanupStatus.Completed));
+        Assert.That(resource.AbsenceVerified, Is.EqualTo(!loseRecovery));
         Assert.That(lifecycle.History[0].Kind, Is.EqualTo(LifecycleEventKind.StepAttempt));
         Assert.That(lifecycle.History[1].State, Is.EqualTo(DocumentLifecycleState.CreateUnconfirmed));
+        Assert.That(lifecycle.History.All(item => item.CreationKey == resource.CreationKey), Is.True);
+        Assert.That(handler.Requests, Is.EqualTo(loseRecovery ? new[] { "POST", "GET" } : new[] { "POST", "GET", "DELETE", "GET" }));
+        using var committed = await observer.GetAsync(handler.CommittedPath);
+        Assert.That(committed.StatusCode, Is.EqualTo(loseRecovery ? HttpStatusCode.OK : HttpStatusCode.NotFound));
+        using var stillPresent = await observer.GetAsync(unrelatedPath);
+        Assert.That(stillPresent.StatusCode, Is.EqualTo(HttpStatusCode.OK));
     }
 
     private static async Task<ValidatedDetectionConfiguration> LoadSequenceConfigurationAsync()
@@ -125,17 +182,29 @@ public class DocumentCrudTests
         return ValidatedDetectionConfiguration.Create(input);
     }
 
-    private sealed class LoseCreateResponse : DelegatingHandler
+    private sealed class LoseCreateResponse(bool loseRecovery) : DelegatingHandler
     {
-        private bool createDispatched;
+        public List<string> Requests { get; } = [];
+        public string? Key { get; private set; }
+        public string? CommittedPath { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Assert.That(request.Method, Is.EqualTo(HttpMethod.Post));
-            Assert.That(createDispatched, Is.False, "An uncertain Create was retried.");
-            createDispatched = true;
+            Requests.Add(request.Method.Method);
+            Assert.That(request.Headers.GetValues("X-Test-User").Single(), Is.EqualTo("alice"));
+            if (request.Method != HttpMethod.Post)
+            {
+                var recovery = request.RequestUri!.AbsolutePath == $"/documents/creations/{Key}";
+                Assert.That(recovery || request.RequestUri.AbsolutePath == CommittedPath, Is.True);
+                if (recovery && loseRecovery)
+                    throw new HttpRequestException("Simulated recovery transport failure.");
+                return await base.SendAsync(request, cancellationToken);
+            }
+            Assert.That(Requests, Has.Count.EqualTo(1));
+            Key = request.Headers.GetValues("X-Creation-Key").Single();
             using var response = await base.SendAsync(request, cancellationToken);
             Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+            CommittedPath = response.Headers.Location!.OriginalString;
             throw new HttpRequestException("Simulated connection loss after creation.");
         }
     }

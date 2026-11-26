@@ -37,3 +37,4 @@ dokazi predstavljaju opaženo ponašanje. Klasifikator poredi te dvije strane.
 | Očekivano i opaženo vlasništvo | Identitet i organizacija iz konfiguracije, te zasebne vrijednosti i podudaranja iz opažanja | Application, `ExpectedDocumentOwnership`, `ObservedDocumentOwnership` |
 | Obaveza čišćenja | Status uklanjanja privremenog resursa, uključujući neriješeno kreiranje bez poznatog ID-a | Application, `ResourceCleanupStatus` |
 | Potvrđeno odsustvo | Očekivani 404 iz zasebnog VerifyAbsent koraka | Application, `DocumentLifecycleState.AbsenceVerified` |
+| Korelacija kreiranja | Stabilan ključ namjere, vezan za vlasnika, organizaciju i jedno izvršavanje | `DocumentCreationIntent`, `DocumentResourceRegistry` |

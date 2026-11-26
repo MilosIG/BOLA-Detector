@@ -28,10 +28,11 @@ public class LocalRegressionTests
 
         Assert.That(second.DocumentId, Is.Not.EqualTo(first.DocumentId));
         Assert.That(second.ExecutionId, Is.Not.EqualTo(first.ExecutionId));
+        Assert.That(second.CreationKey, Is.Not.EqualTo(first.CreationKey));
         Assert.That(Directory.EnumerateFileSystemEntries(workspace.FullName), Is.Empty);
     }
 
-    private async Task<(Guid DocumentId, Guid ExecutionId)> RunDocumentSequenceAsync(HttpClient client)
+    private async Task<(Guid DocumentId, Guid ExecutionId, Guid CreationKey)> RunDocumentSequenceAsync(HttpClient client)
     {
         await using var demo = await TestProcess.StartAsync("src", "BolaDetector.Demo", workspace.FullName,
             ["--document-sequence"], new Dictionary<string, string> { ["ALICE_TEST_USER"] = "alice" });
@@ -55,6 +56,9 @@ public class LocalRegressionTests
         Assert.That(result.GetProperty("Cleanup").GetArrayLength(), Is.Zero);
         var lifecycle = result.GetProperty("Lifecycle");
         var resource = lifecycle.GetProperty("Resources").EnumerateArray().Single();
+        var creationKey = resource.GetProperty("CreationKey").GetGuid();
+        Assert.That(creationKey, Is.Not.EqualTo(Guid.Empty));
+        Assert.That(resource.GetProperty("CreationRecovered").GetBoolean(), Is.False);
         Assert.That(resource.GetProperty("DocumentId").GetGuid(), Is.EqualTo(id));
         Assert.That(resource.GetProperty("State").GetString(), Is.EqualTo("AbsenceVerified"));
         Assert.That(resource.GetProperty("DeletionAcknowledged").GetBoolean(), Is.True);
@@ -71,10 +75,11 @@ public class LocalRegressionTests
         var history = lifecycle.GetProperty("History").EnumerateArray().ToArray();
         Assert.That(history.Select(item => item.GetProperty("Order").GetInt32()),
             Is.EqualTo(Enumerable.Range(1, history.Length)));
+        Assert.That(history.Select(item => item.GetProperty("CreationKey").GetGuid()), Is.All.EqualTo(creationKey));
         Assert.That(history[^1].GetProperty("State").GetString(), Is.EqualTo("AbsenceVerified"));
         using var missing = await client.GetAsync($"/documents/{id:N}");
         Assert.That(missing.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
-        return (id, lifecycle.GetProperty("ExecutionId").GetGuid());
+        return (id, lifecycle.GetProperty("ExecutionId").GetGuid(), creationKey);
     }
 
     [Test]

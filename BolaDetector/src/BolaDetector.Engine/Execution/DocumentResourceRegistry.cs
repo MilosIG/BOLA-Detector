@@ -21,6 +21,72 @@ internal sealed class DocumentResourceRegistry
     }
 
     public Guid? Resolve(string resource) => Get(resource).Id;
+    public DocumentCreationIntent GetIntent(string resource) => Get(resource).Intent;
+
+    public DocumentStepResult CompleteCorrelatedCreate(DocumentStep step, DocumentRecoveryResult result)
+    {
+        var resource = Get(step.Resource);
+        if (result.Outcome == DocumentRecoveryOutcome.Confirmed && ValidateEvidence(resource, result.Evidence) is null)
+        {
+            RecordConfirmedOwnership(resource, result.Evidence!);
+            return Complete(step, new(DocumentOperationOutcome.Succeeded, CreatedId: result.Evidence!.DocumentId));
+        }
+
+        var error = result.Outcome switch
+        {
+            DocumentRecoveryOutcome.Rejected => "CreateRejected",
+            DocumentRecoveryOutcome.Conflict => "CreationConflict",
+            _ => "CreateUnconfirmed"
+        };
+        return Complete(step, new(DocumentOperationOutcome.Failed, error));
+    }
+
+    public string[] PendingRecovery() => resources.Values
+        .Where(resource => resource.Cleanup == ResourceCleanupStatus.UnresolvedCreation)
+        .Select(resource => resource.CreateStep.Resource).ToArray();
+
+    public void RecordRecoveryAttempt(string reference)
+    {
+        var resource = Get(reference);
+        Record(resource, resource.CreateStep.Id, DocumentStepOperation.Create, LifecycleEventKind.RecoveryAttempt, resource.State);
+    }
+
+    public void CompleteRecovery(string reference, DocumentRecoveryResult result, string? failure = null)
+    {
+        var resource = Get(reference);
+        var previous = resource.State;
+        var error = failure ?? (result.Outcome is DocumentRecoveryOutcome.Confirmed or DocumentRecoveryOutcome.PreviouslyDeleted
+            ? ValidateEvidence(resource, result.Evidence) : result.Outcome.ToString());
+        if (error is null && (previous != DocumentLifecycleState.CreateUnconfirmed || resource.Id.HasValue))
+            error = "RecoveryStateConflict";
+        if (error is null)
+        {
+            Bind(resource, result.Evidence!.DocumentId);
+            resource.Recovered = true;
+            resource.SkipCleanupDelete = result.Outcome == DocumentRecoveryOutcome.PreviouslyDeleted;
+            RecordConfirmedOwnership(resource, result.Evidence!);
+        }
+        Record(resource, resource.CreateStep.Id, DocumentStepOperation.Create, LifecycleEventKind.RecoveryResult, previous,
+            error is null ? SequenceStepOutcome.Succeeded : SequenceStepOutcome.Failed,
+            error ?? result.Outcome.ToString(), error is null ? resource.ObservedOwnership : null);
+    }
+
+    private string? ValidateEvidence(TrackedDocument resource, DocumentCreationEvidence? evidence)
+    {
+        if (evidence is null || evidence.DocumentId == Guid.Empty)
+            return "InvalidCreationEvidence";
+        if (evidence.Key != resource.Intent.Key || !evidence.IntentMatches)
+            return "CreationIntentMismatch";
+        if (evidence.Owner != resource.Ownership.Owner)
+            return "RecoveryOwnerMismatch";
+        if (evidence.OrganizationId != resource.Ownership.OrganizationId)
+            return "RecoveryOrganizationMismatch";
+        return resources.Values.Any(item => item.Id == evidence.DocumentId) ? "ConflictingRecoveredId" : null;
+    }
+
+    private static void RecordConfirmedOwnership(TrackedDocument resource, DocumentCreationEvidence evidence) =>
+        resource.ObservedOwnership = new(ToPublicLabel(evidence.Owner), ToPublicLabel(evidence.Organization),
+            evidence.OrganizationId, true, true);
 
     public bool CanExecute(DocumentStep step)
     {
@@ -54,7 +120,8 @@ internal sealed class DocumentResourceRegistry
         var error = Apply(step, resource, operation);
         var outcome = error is null ? SequenceStepOutcome.Succeeded : SequenceStepOutcome.Failed;
         Record(resource, step.Id, step.Operation, LifecycleEventKind.StepResult, previous, outcome, error,
-            step.Operation == DocumentStepOperation.Read && error is null ? resource.ObservedOwnership : null);
+            (step.Operation is DocumentStepOperation.Read or DocumentStepOperation.Create) && error is null
+                ? resource.ObservedOwnership : null);
         return new(step.Id, outcome, error, resource.Id);
     }
 
@@ -78,10 +145,11 @@ internal sealed class DocumentResourceRegistry
         return new(step.Id, outcome, error, resource.Id);
     }
 
-    public (string Resource, Guid Id)[] PendingCleanup() => resources.Values
+    public (string Resource, Guid Id, bool SkipDelete)[] PendingCleanup() => resources.Values
         .Where(resource => resource.Cleanup == ResourceCleanupStatus.Required)
         .OrderByDescending(resource => resource.CreationOrder)
-        .Select(resource => (resource.CreateStep.Resource, resource.Id!.Value)).ToArray();
+        .Select(resource => (resource.CreateStep.Resource, resource.Id!.Value,
+            resource.SkipCleanupDelete || resource.DeletionAcknowledged)).ToArray();
 
     public void RecordCleanupAttempt(string reference)
     {
@@ -97,23 +165,44 @@ internal sealed class DocumentResourceRegistry
             AcknowledgeDeletion(resource);
         else if (outcome == DocumentCleanupOutcome.AlreadyAbsent && resource.State != DocumentLifecycleState.AbsenceVerified)
             resource.State = DocumentLifecycleState.AbsentAtCleanup;
-        resource.Cleanup = outcome == DocumentCleanupOutcome.Failed ? ResourceCleanupStatus.Failed : ResourceCleanupStatus.Completed;
+        resource.Cleanup = outcome == DocumentCleanupOutcome.Failed ? ResourceCleanupStatus.Failed : ResourceCleanupStatus.Required;
         var succeeded = outcome != DocumentCleanupOutcome.Failed;
         Record(resource, null, DocumentStepOperation.Delete, LifecycleEventKind.CleanupResult, previous,
             succeeded ? SequenceStepOutcome.Succeeded : SequenceStepOutcome.Failed, succeeded ? outcome.ToString() : error);
     }
 
+    public void CompleteCleanupVerification(string reference, bool absent, string? error)
+    {
+        var resource = Get(reference);
+        var previous = resource.State;
+        if (absent)
+            resource.State = DocumentLifecycleState.AbsenceVerified;
+        resource.Cleanup = absent ? ResourceCleanupStatus.Completed : ResourceCleanupStatus.Failed;
+        Record(resource, null, DocumentStepOperation.VerifyAbsent, LifecycleEventKind.CleanupVerification, previous,
+            absent ? SequenceStepOutcome.Succeeded : SequenceStepOutcome.Failed, error);
+    }
+
     public DocumentLifecycleResult Snapshot() => new(executionId,
         resources.Values.Select(resource => new TrackedDocumentResult(resource.CreateStep.Resource, "document", resource.CreateStep.Id,
             resource.Id, resource.Ownership, resource.ObservedOwnership, resource.State, resource.DeletionAcknowledged,
-            resource.Cleanup)).ToImmutableArray(), history.ToImmutableArray());
+            resource.Cleanup)
+        {
+            CreationKey = resource.Intent.Key,
+            CreationRecovered = resource.Recovered
+        })
+            .ToImmutableArray(), history.ToImmutableArray());
 
     private string? Apply(DocumentStep step, TrackedDocument resource, DocumentOperationResult operation)
     {
         if (step.Operation == DocumentStepOperation.Create)
             return CompleteCreation(resource, operation);
         if (operation.Outcome == DocumentOperationOutcome.Failed)
+        {
+            if (step.Operation == DocumentStepOperation.VerifyAbsent && resource.DeletionAcknowledged &&
+                resource.State != DocumentLifecycleState.AbsenceVerified)
+                resource.Cleanup = ResourceCleanupStatus.Failed;
             return operation.Error ?? "OperationFailed";
+        }
 
         switch (step.Operation, operation.Outcome)
         {
@@ -130,10 +219,11 @@ internal sealed class DocumentResourceRegistry
                 break;
             case (DocumentStepOperation.Delete, DocumentOperationOutcome.Succeeded):
                 AcknowledgeDeletion(resource);
-                resource.Cleanup = ResourceCleanupStatus.Completed;
+                resource.Cleanup = ResourceCleanupStatus.Required;
                 break;
             case (DocumentStepOperation.VerifyAbsent, DocumentOperationOutcome.Absent):
                 resource.State = DocumentLifecycleState.AbsenceVerified;
+                resource.Cleanup = ResourceCleanupStatus.Completed;
                 break;
             default:
                 return "UnexpectedOperationOutcome";
@@ -147,10 +237,7 @@ internal sealed class DocumentResourceRegistry
         if (operation.Outcome == DocumentOperationOutcome.Succeeded &&
             operation.CreatedId is { } id && id != Guid.Empty && resources.Values.All(item => item.Id != id))
         {
-            resource.Id = id;
-            resource.CreationOrder = history.Count;
-            resource.State = DocumentLifecycleState.Created;
-            resource.Cleanup = ResourceCleanupStatus.Required;
+            Bind(resource, id);
             return null;
         }
 
@@ -164,6 +251,14 @@ internal sealed class DocumentResourceRegistry
         resource.State = uncertain ? DocumentLifecycleState.CreateUnconfirmed : DocumentLifecycleState.CreateRejected;
         resource.Cleanup = uncertain ? ResourceCleanupStatus.UnresolvedCreation : ResourceCleanupStatus.NotRequired;
         return error;
+    }
+
+    private void Bind(TrackedDocument resource, Guid id)
+    {
+        resource.Id = id;
+        resource.CreationOrder = history.Count;
+        resource.State = DocumentLifecycleState.Created;
+        resource.Cleanup = ResourceCleanupStatus.Required;
     }
 
     private static void Observe(TrackedDocument resource, string stepId, OwnedDocumentState state)
@@ -194,13 +289,19 @@ internal sealed class DocumentResourceRegistry
         DocumentLifecycleState previous, SequenceStepOutcome? outcome = null, string? reason = null,
         ObservedDocumentOwnership? observation = null) =>
         history.Add(new(history.Count + 1, resource.CreateStep.Resource, resource.Id, stepId, operation, kind, previous,
-            resource.State, outcome, reason, observation));
+            resource.State, outcome, reason, observation)
+        {
+            CreationKey = resource.Intent.Key
+        });
 
     private sealed record ReadObservation(OwnedDocumentState State, int Revision);
 
     private sealed class TrackedDocument(DocumentStep createStep, ExpectedDocumentOwnership ownership)
     {
         public DocumentStep CreateStep { get; } = createStep;
+        public DocumentCreationIntent Intent { get; } = new(Guid.NewGuid(), createStep.Title!.Trim());
+        public bool Recovered { get; set; }
+        public bool SkipCleanupDelete { get; set; }
         public ExpectedDocumentOwnership Ownership { get; } = ownership;
         public Guid? Id { get; set; }
         public int CreationOrder { get; set; }

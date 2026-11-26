@@ -127,6 +127,7 @@ public class DocumentSequenceTests
         {
             DocumentStepOperation.Create => new(DocumentOperationOutcome.Succeeded, CreatedId: id),
             DocumentStepOperation.Delete when resource == id && !cleanupFails => new(DocumentOperationOutcome.Succeeded),
+            DocumentStepOperation.VerifyAbsent => new(DocumentOperationOutcome.Absent),
             _ => new(DocumentOperationOutcome.Failed)
         });
         var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
@@ -139,9 +140,9 @@ public class DocumentSequenceTests
         var resource = result.Lifecycle!.Resources.Single();
         Assert.That(resource.DocumentId, Is.EqualTo(id));
         Assert.That(resource.State, Is.EqualTo(cleanupFails
-            ? DocumentLifecycleState.Created : DocumentLifecycleState.DeletionAcknowledged));
+            ? DocumentLifecycleState.Created : DocumentLifecycleState.AbsenceVerified));
         Assert.That(resource.CleanupStatus, Is.EqualTo(cleanupFails ? ResourceCleanupStatus.Failed : ResourceCleanupStatus.Completed));
-        Assert.That(resource.AbsenceVerified, Is.False);
+        Assert.That(resource.AbsenceVerified, Is.EqualTo(!cleanupFails));
         Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.EqualTo(cleanupFails));
     }
 
@@ -160,10 +161,10 @@ public class DocumentSequenceTests
                 cancellation.Cancel();
                 token.ThrowIfCancellationRequested();
             }
-            Assert.That(operation, Is.EqualTo(DocumentStepOperation.Delete));
+            Assert.That(operation, Is.AnyOf(DocumentStepOperation.Delete, DocumentStepOperation.VerifyAbsent));
             Assert.That(resource, Is.EqualTo(id));
             Assert.That(token.IsCancellationRequested, Is.False);
-            return new(DocumentOperationOutcome.Succeeded);
+            return new(operation == DocumentStepOperation.Delete ? DocumentOperationOutcome.Succeeded : DocumentOperationOutcome.Absent);
         });
         var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
 
@@ -180,7 +181,7 @@ public class DocumentSequenceTests
     {
         var stub = new Stub((operation, _, _) => operation == DocumentStepOperation.Create
             ? new(DocumentOperationOutcome.Succeeded, CreatedId: Guid.NewGuid())
-            : new(DocumentOperationOutcome.Succeeded));
+            : new(operation == DocumentStepOperation.VerifyAbsent ? DocumentOperationOutcome.Absent : DocumentOperationOutcome.Succeeded));
         var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
         var executor = new DocumentSequenceExecutor(stub);
 
@@ -190,6 +191,7 @@ public class DocumentSequenceTests
         Assert.That(first.Steps.Single().DocumentId, Is.Not.EqualTo(second.Steps.Single().DocumentId));
         Assert.That(first.Succeeded && second.Succeeded, Is.True);
         Assert.That(first.Lifecycle!.ExecutionId, Is.Not.EqualTo(second.Lifecycle!.ExecutionId));
+        Assert.That(first.Lifecycle.Resources[0].CreationKey, Is.Not.EqualTo(second.Lifecycle.Resources[0].CreationKey));
         var snapshot = first.Lifecycle.Resources.SetItem(0, first.Lifecycle.Resources[0] with { DocumentId = null });
         Assert.That(snapshot[0].DocumentId, Is.Null);
         Assert.That(first.Lifecycle.Resources[0].DocumentId, Is.EqualTo(first.Steps.Single().DocumentId));
@@ -215,7 +217,8 @@ public class DocumentSequenceTests
         var id = Guid.NewGuid();
         var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
         var stub = new Stub((operation, _, _) => operation == DocumentStepOperation.Create
-            ? new(DocumentOperationOutcome.Succeeded, CreatedId: id) : new(DocumentOperationOutcome.Succeeded));
+            ? new(DocumentOperationOutcome.Succeeded, CreatedId: id)
+            : new(operation == DocumentStepOperation.VerifyAbsent ? DocumentOperationOutcome.Absent : DocumentOperationOutcome.Succeeded));
 
         var result = await new DocumentSequenceExecutor(stub).ExecuteAsync(
             Sequence(Create, Create with { Id = "other-create", Resource = "other" }), configuration, default);
@@ -223,7 +226,8 @@ public class DocumentSequenceTests
         Assert.That(result.Lifecycle!.Resources.Single(resource => resource.Resource == "other").DocumentId, Is.Null);
         Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.True);
         Assert.That(result.Cleanup.Single().Resource, Is.EqualTo(Create.Resource));
-        Assert.That(stub.Snapshots, Has.Count.EqualTo(3));
+        Assert.That(stub.Snapshots, Has.Count.EqualTo(4));
+        Assert.That(result.Lifecycle.Resources.Select(resource => resource.CreationKey).Distinct().Count(), Is.EqualTo(2));
     }
 
     [Test]
@@ -272,10 +276,91 @@ public class DocumentSequenceTests
         var resource = result.Lifecycle!.Resources.Single();
         Assert.That(resource.State, Is.EqualTo(DocumentLifecycleState.DeletionAcknowledged));
         Assert.That(resource.AbsenceVerified, Is.False);
-        Assert.That(resource.CleanupStatus, Is.EqualTo(ResourceCleanupStatus.Completed));
+        Assert.That(resource.CleanupStatus, Is.EqualTo(ResourceCleanupStatus.Failed));
         Assert.That(result.Steps[3].Error, Is.EqualTo("ResourceUnavailable"));
         Assert.That(result.Cleanup, Is.Empty);
         Assert.That(stub.Snapshots, Has.Count.EqualTo(3));
+    }
+
+    [TestCase("confirmed", null)]
+    [TestCase("foreign-owner", "RecoveryOwnerMismatch")]
+    [TestCase("foreign-org", "RecoveryOrganizationMismatch")]
+    [TestCase("different-key", "CreationIntentMismatch")]
+    [TestCase("different-intent", "CreationIntentMismatch")]
+    [TestCase("empty-id", "InvalidCreationEvidence")]
+    [TestCase("missing", "Missing")]
+    [TestCase("unverified-absence", null)]
+    public async Task ExecuteAsync_WhenCreateIsAmbiguous_RequiresVerifiedEvidenceAndRetainsOriginalFailure(
+        string variant, string? recoveryError)
+    {
+        using var caller = new CancellationTokenSource();
+        var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
+        var documentId = Guid.NewGuid();
+        var stub = new RecoveryStub((intent, owner) =>
+        {
+            if (variant == "missing")
+                return new(DocumentRecoveryOutcome.Missing);
+            return new(DocumentRecoveryOutcome.Confirmed, new(
+                variant == "different-key" ? Guid.NewGuid() : intent.Key,
+                variant == "empty-id" ? Guid.Empty : documentId,
+                variant == "foreign-owner" ? "bob" : owner.Name,
+                variant == "foreign-org" ? Guid.NewGuid() : owner.Identity.OrganizationId,
+                variant != "different-intent"));
+        }, () => caller.Cancel(), variant != "unverified-absence");
+
+        var result = await new DocumentSequenceExecutor(stub).ExecuteAsync(Sequence(Create, Read), configuration, caller.Token);
+
+        var resource = result.Lifecycle!.Resources.Single();
+        Assert.That(result.Succeeded, Is.False);
+        Assert.That(result.Cancelled, Is.True);
+        Assert.That(result.Steps[0].Error, Is.EqualTo("CreateUnconfirmed"));
+        Assert.That(resource.CreationKey, Is.EqualTo(stub.OriginalIntent!.Key));
+        Assert.That(resource.CreationRecovered, Is.EqualTo(recoveryError is null));
+        Assert.That(resource.DocumentId, Is.EqualTo(recoveryError is null ? documentId : (Guid?)null));
+        Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.EqualTo(variant != "confirmed"));
+        Assert.That(result.Lifecycle.History.Single(item => item.Kind == LifecycleEventKind.RecoveryResult).Reason,
+            Is.EqualTo(recoveryError ?? "Confirmed"));
+        Assert.That(stub.CleanupCalls, Is.EqualTo(recoveryError is null
+            ? new[] { DocumentStepOperation.Delete, DocumentStepOperation.VerifyAbsent } : Array.Empty<DocumentStepOperation>()));
+        if (variant == "unverified-absence")
+            Assert.That(resource.State, Is.EqualTo(DocumentLifecycleState.DeletionAcknowledged));
+    }
+
+    private sealed class RecoveryStub(Func<DocumentCreationIntent, ConfiguredIdentity, DocumentRecoveryResult> recover,
+        Action cancelCaller, bool verifiesAbsence) : ICorrelatedDocumentClient
+    {
+        public DocumentCreationIntent? OriginalIntent { get; private set; }
+        public List<DocumentStepOperation> CleanupCalls { get; } = [];
+        private CancellationToken recoveryToken;
+
+        public Task<DocumentRecoveryResult> CreateAsync(DocumentCreationIntent intent, ConfiguredIdentity owner,
+            ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
+        {
+            Assert.That(intent.Key, Is.Not.EqualTo(Guid.Empty));
+            OriginalIntent = intent;
+            cancelCaller();
+            return Task.FromResult(new DocumentRecoveryResult(DocumentRecoveryOutcome.TransportFailure));
+        }
+
+        public Task<DocumentRecoveryResult> RecoverAsync(DocumentCreationIntent intent, ConfiguredIdentity owner,
+            ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
+        {
+            Assert.That(intent, Is.EqualTo(OriginalIntent));
+            Assert.That(cancellationToken.CanBeCanceled, Is.True);
+            Assert.That(cancellationToken.IsCancellationRequested, Is.False);
+            recoveryToken = cancellationToken;
+            return Task.FromResult(recover(intent, owner));
+        }
+
+        public Task<DocumentOperationResult> ExecuteAsync(DocumentStepOperation operation, Guid? id, string? title,
+            ConfiguredIdentity owner, ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
+        {
+            Assert.That(cancellationToken, Is.EqualTo(recoveryToken));
+            CleanupCalls.Add(operation);
+            return Task.FromResult(new DocumentOperationResult(operation == DocumentStepOperation.VerifyAbsent
+                ? verifiesAbsence ? DocumentOperationOutcome.Absent : DocumentOperationOutcome.Failed
+                : DocumentOperationOutcome.Succeeded));
+        }
     }
 
     private sealed class Stub(Func<DocumentStepOperation, Guid?, CancellationToken, DocumentOperationResult> execute)

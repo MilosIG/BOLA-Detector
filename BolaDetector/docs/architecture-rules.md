@@ -59,6 +59,9 @@ Registar životnog ciklusa u Engine-u posjeduje veze resursa, pravila prelaza
 i obaveze čišćenja za jedno izvršavanje. Application definiše nepromjenljiv
 rezultat. Infrastructure priprema opaženo vlasništvo iz lokalnog odgovora.
 [Ugovor životnog ciklusa](implementation-v5-1-resource-lifecycle-modeling.md).
+Oporavak kreiranja koristi eksplicitan aplikacioni port. Registar potvrđuje
+vezu sa namjerom i vlasništvom prije čišćenja.
+[Ugovor oporavka](implementation-v5-2-reliable-creation-and-cleanup.md).
 
 - Koristi konstruktorsko ubrizgavanje za saradnike. Razrješavanje servisa
   pripada composition root-u. Singleton zahtijeva bezbjednu konkurentnu

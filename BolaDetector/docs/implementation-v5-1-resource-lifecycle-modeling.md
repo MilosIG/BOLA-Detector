@@ -1,5 +1,9 @@
 # Phase 5.1 — Resource lifecycle modeling
 
+Phase 5.2 extends this model with owner-scoped creation recovery and
+independent verification after compensating cleanup.
+[Current recovery contract](implementation-v5-2-reliable-creation-and-cleanup.md).
+
 A document sequence now returns an immutable lifecycle snapshot for one execution. The registry replaces the separate resource ID, observation, and pending cleanup maps. It registers each validated Create step before execution and associates the logical reference with an actual GUID only after confirmation. The execution ID identifies the run independently of its reusable sequence definition.
 
 | Component | Responsibility |

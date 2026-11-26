@@ -50,6 +50,12 @@ public sealed class DocumentSequenceExecutor(IOwnedDocumentClient documents) : I
 
         try
         {
+            if (step.Operation == DocumentStepOperation.Create && documents is ICorrelatedDocumentClient correlated)
+            {
+                var creation = await correlated.CreateAsync(registry.GetIntent(step.Resource), owner, configuration, cancellationToken);
+                return registry.CompleteCorrelatedCreate(step, creation);
+            }
+
             var result = await documents.ExecuteAsync(step.Operation, registry.Resolve(step.Resource), step.Title?.Trim(),
                 owner, configuration, cancellationToken);
             return registry.Complete(step, result);
@@ -64,8 +70,16 @@ public sealed class DocumentSequenceExecutor(IOwnedDocumentClient documents) : I
         ValidatedDetectionConfiguration configuration, List<DocumentCleanupResult> cleanup)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        foreach (var (resource, id) in registry.PendingCleanup())
+        await RecoverAsync(registry, owner, configuration, timeout.Token);
+        foreach (var (resource, id, skipDelete) in registry.PendingCleanup())
         {
+            if (skipDelete)
+            {
+                if (!await VerifyCleanupAsync(registry, resource, id, owner, configuration, timeout.Token))
+                    cleanup.Add(new(resource, DocumentCleanupOutcome.Failed));
+                continue;
+            }
+
             var outcome = DocumentCleanupOutcome.Failed;
             var error = "CleanupTimeout";
             if (!timeout.IsCancellationRequested)
@@ -89,7 +103,61 @@ public sealed class DocumentSequenceExecutor(IOwnedDocumentClient documents) : I
                 }
             }
             registry.CompleteCleanup(resource, outcome, error);
+            if (outcome != DocumentCleanupOutcome.Failed &&
+                !await VerifyCleanupAsync(registry, resource, id, owner, configuration, timeout.Token))
+                outcome = DocumentCleanupOutcome.Failed;
             cleanup.Add(new(resource, outcome));
         }
+    }
+
+    private async Task RecoverAsync(DocumentResourceRegistry registry, ConfiguredIdentity owner,
+        ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
+    {
+        foreach (var resource in registry.PendingRecovery())
+        {
+            var result = new DocumentRecoveryResult(DocumentRecoveryOutcome.Unsupported);
+            string? failure = null;
+            if (documents is ICorrelatedDocumentClient correlated && !cancellationToken.IsCancellationRequested)
+            {
+                registry.RecordRecoveryAttempt(resource);
+                try
+                {
+                    result = await correlated.RecoverAsync(registry.GetIntent(resource), owner, configuration, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    failure = "RecoveryTimeout";
+                }
+            }
+            if (cancellationToken.IsCancellationRequested)
+                failure = "RecoveryTimeout";
+            registry.CompleteRecovery(resource, result, failure);
+        }
+    }
+
+    private async Task<bool> VerifyCleanupAsync(DocumentResourceRegistry registry, string resource, Guid id,
+        ConfiguredIdentity owner, ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
+    {
+        var error = "CleanupVerificationTimeout";
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var result = await documents.ExecuteAsync(DocumentStepOperation.VerifyAbsent, id, null, owner, configuration,
+                    cancellationToken);
+                if (result.Outcome == DocumentOperationOutcome.Absent)
+                {
+                    registry.CompleteCleanupVerification(resource, absent: true, error: null);
+                    return true;
+                }
+                error = result.Error ?? "CleanupAbsenceUnconfirmed";
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Preserve the deletion acknowledgement when verification times out.
+            }
+        }
+        registry.CompleteCleanupVerification(resource, absent: false, error);
+        return false;
     }
 }
