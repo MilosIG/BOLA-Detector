@@ -21,6 +21,18 @@ public class LocalRegressionTests
     public async Task Demo_WhenDocumentSequenceIsSelected_ReportsLifecycleAndLeavesNoDocument()
     {
         await using var api = await LocalApiProcess.StartAsync(workspace.FullName, 5081);
+        api.Client.DefaultRequestHeaders.Add("X-Test-User", "alice");
+
+        var first = await RunDocumentSequenceAsync(api.Client);
+        var second = await RunDocumentSequenceAsync(api.Client);
+
+        Assert.That(second.DocumentId, Is.Not.EqualTo(first.DocumentId));
+        Assert.That(second.ExecutionId, Is.Not.EqualTo(first.ExecutionId));
+        Assert.That(Directory.EnumerateFileSystemEntries(workspace.FullName), Is.Empty);
+    }
+
+    private async Task<(Guid DocumentId, Guid ExecutionId)> RunDocumentSequenceAsync(HttpClient client)
+    {
         await using var demo = await TestProcess.StartAsync("src", "BolaDetector.Demo", workspace.FullName,
             ["--document-sequence"], new Dictionary<string, string> { ["ALICE_TEST_USER"] = "alice" });
 
@@ -41,10 +53,28 @@ public class LocalRegressionTests
         Assert.That(id, Is.Not.EqualTo(Guid.Empty));
         Assert.That(steps.Select(step => step.GetProperty("DocumentId").GetGuid()), Is.All.EqualTo(id));
         Assert.That(result.GetProperty("Cleanup").GetArrayLength(), Is.Zero);
-        api.Client.DefaultRequestHeaders.Add("X-Test-User", "alice");
-        using var missing = await api.Client.GetAsync($"/documents/{id:N}");
+        var lifecycle = result.GetProperty("Lifecycle");
+        var resource = lifecycle.GetProperty("Resources").EnumerateArray().Single();
+        Assert.That(resource.GetProperty("DocumentId").GetGuid(), Is.EqualTo(id));
+        Assert.That(resource.GetProperty("State").GetString(), Is.EqualTo("AbsenceVerified"));
+        Assert.That(resource.GetProperty("DeletionAcknowledged").GetBoolean(), Is.True);
+        Assert.That(resource.GetProperty("AbsenceVerified").GetBoolean(), Is.True);
+        Assert.That(resource.GetProperty("CleanupStatus").GetString(), Is.EqualTo("Completed"));
+        Assert.That(lifecycle.GetProperty("HasUnresolvedCleanup").GetBoolean(), Is.False);
+        var expected = resource.GetProperty("ExpectedOwnership");
+        var observed = resource.GetProperty("ObservedOwnership");
+        Assert.That(expected.GetProperty("Owner").GetString(), Is.EqualTo("alice"));
+        Assert.That(observed.GetProperty("Owner").GetString(), Is.EqualTo("alice"));
+        Assert.That(observed.GetProperty("Organization").GetString(), Is.EqualTo("org-a"));
+        Assert.That(observed.GetProperty("OrganizationId").GetGuid(), Is.EqualTo(expected.GetProperty("OrganizationId").GetGuid()));
+        Assert.That(observed.GetProperty("OrganizationMatches").GetBoolean(), Is.True);
+        var history = lifecycle.GetProperty("History").EnumerateArray().ToArray();
+        Assert.That(history.Select(item => item.GetProperty("Order").GetInt32()),
+            Is.EqualTo(Enumerable.Range(1, history.Length)));
+        Assert.That(history[^1].GetProperty("State").GetString(), Is.EqualTo("AbsenceVerified"));
+        using var missing = await client.GetAsync($"/documents/{id:N}");
         Assert.That(missing.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
-        Assert.That(Directory.EnumerateFileSystemEntries(workspace.FullName), Is.Empty);
+        return (id, lifecycle.GetProperty("ExecutionId").GetGuid());
     }
 
     [Test]

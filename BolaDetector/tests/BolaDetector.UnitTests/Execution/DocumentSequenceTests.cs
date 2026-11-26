@@ -111,6 +111,11 @@ public class DocumentSequenceTests
         }));
         Assert.That(result.Steps[0].Error, Is.EqualTo("MissingOrDuplicateCreatedId"));
         Assert.That(stub.Snapshots, Has.Count.EqualTo(1));
+        var resource = result.Lifecycle!.Resources.Single();
+        Assert.That(resource.DocumentId, Is.Null);
+        Assert.That(resource.CreationConfirmed, Is.False);
+        Assert.That(resource.State, Is.EqualTo(DocumentLifecycleState.CreateUnconfirmed));
+        Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.True);
     }
 
     [TestCase(false, DocumentCleanupOutcome.Deleted)]
@@ -131,6 +136,13 @@ public class DocumentSequenceTests
         Assert.That(result.Steps[1].Outcome, Is.EqualTo(SequenceStepOutcome.Failed));
         Assert.That(result.Steps[2].Outcome, Is.EqualTo(SequenceStepOutcome.Skipped));
         Assert.That(result.Cleanup.Single().Outcome, Is.EqualTo(expected));
+        var resource = result.Lifecycle!.Resources.Single();
+        Assert.That(resource.DocumentId, Is.EqualTo(id));
+        Assert.That(resource.State, Is.EqualTo(cleanupFails
+            ? DocumentLifecycleState.Created : DocumentLifecycleState.DeletionAcknowledged));
+        Assert.That(resource.CleanupStatus, Is.EqualTo(cleanupFails ? ResourceCleanupStatus.Failed : ResourceCleanupStatus.Completed));
+        Assert.That(resource.AbsenceVerified, Is.False);
+        Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.EqualTo(cleanupFails));
     }
 
     [Test]
@@ -177,6 +189,93 @@ public class DocumentSequenceTests
 
         Assert.That(first.Steps.Single().DocumentId, Is.Not.EqualTo(second.Steps.Single().DocumentId));
         Assert.That(first.Succeeded && second.Succeeded, Is.True);
+        Assert.That(first.Lifecycle!.ExecutionId, Is.Not.EqualTo(second.Lifecycle!.ExecutionId));
+        var snapshot = first.Lifecycle.Resources.SetItem(0, first.Lifecycle.Resources[0] with { DocumentId = null });
+        Assert.That(snapshot[0].DocumentId, Is.Null);
+        Assert.That(first.Lifecycle.Resources[0].DocumentId, Is.EqualTo(first.Steps.Single().DocumentId));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_WhenCancelledBeforeCreate_KeepsRegistrationPending()
+    {
+        var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
+        var stub = new Stub((_, _, _) => throw new AssertionException("Transport was called."));
+
+        var result = await new DocumentSequenceExecutor(stub).ExecuteAsync(Sequence(Create), configuration,
+            new CancellationToken(canceled: true));
+
+        Assert.That(result.Lifecycle!.Resources.Single().State, Is.EqualTo(DocumentLifecycleState.PendingCreation));
+        Assert.That(result.Lifecycle.History.Single().Outcome, Is.EqualTo(SequenceStepOutcome.Cancelled));
+        Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.False);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_WhenCreateReturnsDuplicateId_DoesNotBindOrCleanUpTheSecondResource()
+    {
+        var id = Guid.NewGuid();
+        var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
+        var stub = new Stub((operation, _, _) => operation == DocumentStepOperation.Create
+            ? new(DocumentOperationOutcome.Succeeded, CreatedId: id) : new(DocumentOperationOutcome.Succeeded));
+
+        var result = await new DocumentSequenceExecutor(stub).ExecuteAsync(
+            Sequence(Create, Create with { Id = "other-create", Resource = "other" }), configuration, default);
+
+        Assert.That(result.Lifecycle!.Resources.Single(resource => resource.Resource == "other").DocumentId, Is.Null);
+        Assert.That(result.Lifecycle.HasUnresolvedCleanup, Is.True);
+        Assert.That(result.Cleanup.Single().Resource, Is.EqualTo(Create.Resource));
+        Assert.That(stub.Snapshots, Has.Count.EqualTo(3));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_WhenObservedOwnershipConflicts_RetainsExpectationsAndRecordsMismatch()
+    {
+        var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
+        var expected = configuration.Identities.Single(identity => identity.Name == "alice");
+        var stub = new Stub((operation, _, _) => operation switch
+        {
+            DocumentStepOperation.Create => new(DocumentOperationOutcome.Succeeded, CreatedId: Guid.NewGuid()),
+            DocumentStepOperation.Read => new(DocumentOperationOutcome.Succeeded,
+                State: new("bob", "Initial") { Organization = "org-b" }),
+            _ => new(DocumentOperationOutcome.Succeeded)
+        });
+
+        var result = await new DocumentSequenceExecutor(stub).ExecuteAsync(Sequence(Create, Read, Verify), configuration, default);
+
+        var resource = result.Lifecycle!.Resources.Single();
+        Assert.That(resource.ExpectedOwnership, Is.EqualTo(new ExpectedDocumentOwnership(expected.Identity.Id, expected.Name,
+            expected.Identity.OrganizationId)));
+        Assert.That(resource.ObservedOwnership, Is.EqualTo(new ObservedDocumentOwnership("bob", "org-b", null, false, false)));
+        Assert.That(result.Steps[2].Error, Is.EqualTo("UnexpectedDocumentState"));
+        var read = result.Lifecycle.History.Single(item => item.StepId == "read" && item.Kind == LifecycleEventKind.StepResult);
+        Assert.That(read.Observation, Is.EqualTo(resource.ObservedOwnership));
+        Assert.That(read.State, Is.EqualTo(DocumentLifecycleState.Observed));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_WhenAbsenceCheckFails_KeepsDeleteAcknowledgementWithoutRepeatingCleanup()
+    {
+        var configuration = ValidatedDetectionConfiguration.Create(DetectionTestFixture.Config());
+        var stub = new Stub((operation, _, _) => operation switch
+        {
+            DocumentStepOperation.Create => new(DocumentOperationOutcome.Succeeded, CreatedId: Guid.NewGuid()),
+            DocumentStepOperation.Delete => new(DocumentOperationOutcome.Succeeded),
+            DocumentStepOperation.VerifyAbsent => new(DocumentOperationOutcome.Failed, "UnexpectedStatus"),
+            _ => throw new AssertionException("An operation on the deleted resource reached the transport.")
+        });
+        var definition = Sequence(Create,
+            new("delete", DocumentStepOperation.Delete, "document", ["create"]),
+            new("absent", DocumentStepOperation.VerifyAbsent, "document", ["create", "delete"]),
+            Read with { DependsOn = ["create", "delete"] });
+
+        var result = await new DocumentSequenceExecutor(stub).ExecuteAsync(definition, configuration, default);
+
+        var resource = result.Lifecycle!.Resources.Single();
+        Assert.That(resource.State, Is.EqualTo(DocumentLifecycleState.DeletionAcknowledged));
+        Assert.That(resource.AbsenceVerified, Is.False);
+        Assert.That(resource.CleanupStatus, Is.EqualTo(ResourceCleanupStatus.Completed));
+        Assert.That(result.Steps[3].Error, Is.EqualTo("ResourceUnavailable"));
+        Assert.That(result.Cleanup, Is.Empty);
+        Assert.That(stub.Snapshots, Has.Count.EqualTo(3));
     }
 
     private sealed class Stub(Func<DocumentStepOperation, Guid?, CancellationToken, DocumentOperationResult> execute)

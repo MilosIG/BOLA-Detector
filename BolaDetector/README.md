@@ -81,6 +81,10 @@ brisanja i potvrde odsustva privremenog dokumenta. Izlazni kodovi su `0` za
 uspjeh, `1` za grešku i `130` za otkazivanje.
 [Model, pravila izvršavanja i testovi](docs/implementation-v4-multi-step-sequences.md).
 
+JSON sadrži i `Lifecycle` sa očekivanim i opaženim vlasništvom, istorijom
+koraka, potvrdom brisanja i preostalim obavezama čišćenja.
+[Model životnog ciklusa i ograničenja](docs/implementation-v5-1-resource-lifecycle-modeling.md).
+
 ## Raspored projekta
 
 ```text

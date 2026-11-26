@@ -1,5 +1,9 @@
 # Autorizovane sekvence lokalnih dokumenata
 
+Faza 5.1 objedinjuje mape resursa i čišćenja opisane ovdje u registar po
+izvršavanju i proširuje JSON rezultat.
+[Trenutni model životnog ciklusa](implementation-v5-1-resource-lifecycle-modeling.md).
+
 `DocumentSequence` opisuje nepromjenljivu, uređenu listu koraka za lokalni
 CRUD. `DocumentStep` imenuje operaciju, logički resurs, direktne zavisnosti i
 naslov kada ga operacija zahtijeva. Postojeći `TestScenario` zadržava ugovor

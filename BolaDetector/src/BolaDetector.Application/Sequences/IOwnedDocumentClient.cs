@@ -1,6 +1,10 @@
 namespace BolaDetector.Application;
 
-public sealed record OwnedDocumentState(string Owner, string Title);
+public sealed record OwnedDocumentState(string Owner, string Title)
+{
+    public string? Organization { get; init; }
+    public Guid? OrganizationId { get; init; }
+}
 
 public enum DocumentOperationOutcome { Succeeded, Absent, Failed }
 

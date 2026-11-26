@@ -59,3 +59,6 @@ Sekvence dokumenata primjenjuju kriterijume P7 kroz aplikacione portove,
 nepromjenljiv snimak konfiguracije i izolovan kontekst izvršavanja. Provjere
 obuhvataju binarne reference, validaciju prije transporta i integraciju s
 lokalnim testnim API-jem. [Dokumentacija sekvenci](implementation-v4-multi-step-sequences.md).
+Registar životnog ciklusa proširuje iste provjere izolacijom po izvršavanju,
+nepromjenljivim rezultatima i evidencijom potvrđenih i neizvjesnih ishoda.
+[Dokumentacija životnog ciklusa](implementation-v5-1-resource-lifecycle-modeling.md).

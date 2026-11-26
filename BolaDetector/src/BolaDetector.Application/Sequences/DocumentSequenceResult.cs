@@ -11,6 +11,8 @@ public sealed record DocumentCleanupResult(string Resource, DocumentCleanupOutco
 public sealed record DocumentSequenceResult(string SequenceId, IReadOnlyList<DocumentStepResult> Steps,
     IReadOnlyList<DocumentCleanupResult> Cleanup, bool Cancelled)
 {
+    public DocumentLifecycleResult? Lifecycle { get; init; }
+
     public bool Succeeded => !Cancelled && Steps.All(step => step.Outcome == SequenceStepOutcome.Succeeded) &&
-        Cleanup.All(item => item.Outcome != DocumentCleanupOutcome.Failed);
+        Cleanup.All(item => item.Outcome != DocumentCleanupOutcome.Failed) && Lifecycle?.HasUnresolvedCleanup != true;
 }

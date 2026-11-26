@@ -55,6 +55,10 @@ Autorizovane sekvence koriste aplikacione portove za orkestraciju i lokalni
 CRUD. Engine drži kontekst izvršavanja unutar jednog poziva. Infrastructure
 prevodi fiksne CRUD operacije u HTTP i priprema tipizirano stanje dokumenta.
 [Model i politika čišćenja](implementation-v4-multi-step-sequences.md).
+Registar životnog ciklusa u Engine-u posjeduje veze resursa, pravila prelaza
+i obaveze čišćenja za jedno izvršavanje. Application definiše nepromjenljiv
+rezultat. Infrastructure priprema opaženo vlasništvo iz lokalnog odgovora.
+[Ugovor životnog ciklusa](implementation-v5-1-resource-lifecycle-modeling.md).
 
 - Koristi konstruktorsko ubrizgavanje za saradnike. Razrješavanje servisa
   pripada composition root-u. Singleton zahtijeva bezbjednu konkurentnu

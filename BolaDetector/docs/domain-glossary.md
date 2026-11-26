@@ -33,3 +33,7 @@ dokazi predstavljaju opaženo ponašanje. Klasifikator poredi te dvije strane.
 | Sekvenca dokumenata | Uređeni autorizovani koraci nad privremenim lokalnim dokumentima | Application, `DocumentSequence`, `DocumentStep` |
 | Logički resurs sekvence | Ime koje Create povezuje s generisanim ID-em u jednom izvršavanju | Application i Engine, `DocumentStep.Resource`, `DocumentSequenceExecutor` |
 | Ishod koraka sekvence | Uspjeh, greška, preskakanje ili otkazivanje | Application, `DocumentStepResult`, `SequenceStepOutcome` |
+| Praćeni resurs | Logički resurs jednog izvršavanja sa potvrđenim stvarnim ID-em kada je poznat | Engine i Application, `DocumentResourceRegistry`, `TrackedDocumentResult` |
+| Očekivano i opaženo vlasništvo | Identitet i organizacija iz konfiguracije, te zasebne vrijednosti i podudaranja iz opažanja | Application, `ExpectedDocumentOwnership`, `ObservedDocumentOwnership` |
+| Obaveza čišćenja | Status uklanjanja privremenog resursa, uključujući neriješeno kreiranje bez poznatog ID-a | Application, `ResourceCleanupStatus` |
+| Potvrđeno odsustvo | Očekivani 404 iz zasebnog VerifyAbsent koraka | Application, `DocumentLifecycleState.AbsenceVerified` |

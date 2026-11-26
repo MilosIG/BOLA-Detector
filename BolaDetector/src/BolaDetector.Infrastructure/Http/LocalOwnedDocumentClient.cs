@@ -11,6 +11,7 @@ public sealed class LocalOwnedDocumentClient(HttpClient client, ITestCredentialP
     private const string DocumentRoute = "/documents/{id}";
     private const string LocationPrefix = "/documents/";
     private const int MaximumBodyBytes = 64 * 1024;
+    private static readonly Guid LocalOrganizationId = new("00000000-0000-0000-0000-000000000001");
 
     public async Task<DocumentOperationResult> ExecuteAsync(DocumentStepOperation operation, Guid? id, string? title,
         ConfiguredIdentity owner, ValidatedDetectionConfiguration configuration, CancellationToken cancellationToken)
@@ -63,7 +64,7 @@ public sealed class LocalOwnedDocumentClient(HttpClient client, ITestCredentialP
         }
         catch (IOException)
         {
-            return new(DocumentOperationOutcome.Failed, "ResponseReadFailed");
+            return new(DocumentOperationOutcome.Failed, method == HttpMethod.Post ? "CreateUnconfirmed" : "ResponseReadFailed");
         }
         catch (JsonException)
         {
@@ -120,6 +121,13 @@ public sealed class LocalOwnedDocumentClient(HttpClient client, ITestCredentialP
             !root.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String)
             return new(DocumentOperationOutcome.Failed, "InvalidDocumentResponse");
 
-        return new(DocumentOperationOutcome.Succeeded, State: new(owner.GetString()!, title.GetString()!));
+        var organization = root.TryGetProperty("organization", out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+        return new(DocumentOperationOutcome.Succeeded, State: new(owner.GetString()!, title.GetString()!)
+        {
+            Organization = organization,
+            OrganizationId = organization == "org-a" ? LocalOrganizationId : null
+        });
     }
 }
