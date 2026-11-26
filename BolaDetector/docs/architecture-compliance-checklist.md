@@ -54,3 +54,8 @@ redoslijed iz zadatka.
 | P12 | Bridge, Decorator i Composite | N/A | N/A | Portovi, HTTP DI, `TestScenario.Steps` | Nezavisne hijerarhije, aplikacioni dekoratori i ugniježđeno stablo nisu potrebni sadašnjem toku. |
 | P13 | Strategy, Chain of Responsibility, Iterator i Observer | PASS | PASS | `IReadEvidenceVerifier`, endpoint filter, LINQ, `Console.CancelKeyPress` | Zamjenljivo ponašanje i standardni framework mehanizmi koriste se na odgovarajućim granicama. |
 | P13 | Template Method, Command, Memento, State i Visitor | N/A | N/A | `RunDetection`, `ResourceSnapshot`, `ExecutionStatus` | Modeli podataka i CRUD operacije nemaju saradnje potrebne za ove obrasce. Kompozicija pokriva trenutnu složenost. |
+
+Sekvence dokumenata primjenjuju kriterijume P7 kroz aplikacione portove,
+nepromjenljiv snimak konfiguracije i izolovan kontekst izvršavanja. Provjere
+obuhvataju binarne reference, validaciju prije transporta i integraciju s
+lokalnim testnim API-jem. [Dokumentacija sekvenci](implementation-v4-multi-step-sequences.md).

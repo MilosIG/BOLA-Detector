@@ -34,9 +34,10 @@ internal sealed class TestProcess : IAsyncDisposable
         };
     }
 
-    public string Diagnostics => $"stdout:{Environment.NewLine}{string.Join(Environment.NewLine, output)}" +
+    public string Diagnostics => $"stdout:{Environment.NewLine}{StandardOutput}" +
         $"{Environment.NewLine}stderr:{Environment.NewLine}{StandardError}";
 
+    public string StandardOutput => string.Join(Environment.NewLine, output);
     public string StandardError => string.Join(Environment.NewLine, errors);
 
     public static async Task<TestProcess> StartAsync(string projectFolder, string project, string workingDirectory,

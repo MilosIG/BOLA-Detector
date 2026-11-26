@@ -1,5 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using BolaDetector.Application;
+using BolaDetector.Engine;
+using BolaDetector.Infrastructure;
+using BolaDetector.Domain;
 using BolaTestApi;
 using BolaTestApi.Documents;
 using Microsoft.AspNetCore.Builder;
@@ -12,6 +16,64 @@ namespace BolaDetector.IntegrationTests;
 
 public class DocumentCrudTests
 {
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task DocumentSequencesUseIsolatedResourcesAndCleanUp(bool failVerification)
+    {
+        await using var factory = CreateFactory(IPAddress.Loopback);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var observer = CreateClient(factory, "alice");
+        var configurationPath = Path.Combine(TestContext.CurrentContext.TestDirectory, "demo-detection.json");
+        var input = await new JsonDetectionConfigurationLoader().LoadAsync(configurationPath, default);
+        var configuration = ValidatedDetectionConfiguration.Create(input);
+        var executor = new DocumentSequenceExecutor(new LocalOwnedDocumentClient(client, new AliceCredential(),
+            new LocalTargetAddressPolicy()));
+        var sequence = new DocumentSequence("integration", "Document lifecycle", "alice",
+        [
+            new("create", DocumentStepOperation.Create, "doc", [], "Original"),
+            new("read", DocumentStepOperation.Read, "doc", ["create"]),
+            new("verify", DocumentStepOperation.Verify, "doc", ["create", "read"], "Original"),
+            new("update", DocumentStepOperation.Update, "doc", ["create", "verify"], "Modified"),
+            new("read-updated", DocumentStepOperation.Read, "doc", ["create", "update"]),
+            new("verify-updated", DocumentStepOperation.Verify, "doc", ["create", "read-updated"],
+                failVerification ? "Wrong title" : "Modified"),
+            new("delete", DocumentStepOperation.Delete, "doc", ["create", "verify-updated"]),
+            new("verify-deleted", DocumentStepOperation.VerifyAbsent, "doc", ["create", "delete"])
+        ]);
+        var originalFixture = await observer.GetFromJsonAsync<TestDocument>("/secure/documents/doc-1");
+
+        var results = await Task.WhenAll(executor.ExecuteAsync(sequence, configuration, default),
+            executor.ExecuteAsync(sequence, configuration, default));
+
+        var ids = results.Select(result => result.Steps[0].DocumentId).ToArray();
+        Assert.That(ids, Is.All.Not.Null);
+        Assert.That(ids.Distinct().Count(), Is.EqualTo(2));
+        foreach (var result in results)
+        {
+            var id = result.Steps[0].DocumentId!.Value;
+            Assert.That(result.Succeeded, Is.EqualTo(!failVerification));
+            Assert.That(result.Steps.Take(5).Select(step => step.Outcome), Is.All.EqualTo(SequenceStepOutcome.Succeeded));
+            Assert.That(result.Steps.Where(step => step.DocumentId.HasValue).Select(step => step.DocumentId), Is.All.EqualTo(id));
+            if (failVerification)
+            {
+                Assert.That(result.Steps[5].Error, Is.EqualTo("UnexpectedDocumentState"));
+                Assert.That(result.Steps.Skip(6).Select(step => step.Outcome), Is.All.EqualTo(SequenceStepOutcome.Skipped));
+                Assert.That(result.Cleanup.Single().Outcome, Is.EqualTo(DocumentCleanupOutcome.Deleted));
+            }
+            else
+                Assert.That(result.Cleanup, Is.Empty);
+            using var absent = await observer.GetAsync($"/documents/{id:N}");
+            Assert.That(absent.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        }
+        Assert.That(originalFixture, Is.Not.Null);
+        Assert.That(await observer.GetFromJsonAsync<TestDocument>("/secure/documents/doc-1"), Is.EqualTo(originalFixture));
+    }
+
+    private sealed class AliceCredential : ITestCredentialProvider
+    {
+        public string Resolve(TestIdentity identity) => "alice";
+    }
+
     [Test]
     public async Task OwnerCanCreateReadUpdateAndDeleteDocument()
     {

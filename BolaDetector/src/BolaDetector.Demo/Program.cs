@@ -10,6 +10,9 @@ using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
 try
 {
+    if (args.FirstOrDefault() == "--document-sequence")
+        return await DocumentSequenceDemo.RunAsync(args.Skip(1).ToArray(), cancellation.Token);
+
     // Composition root alone selects concrete file, transport and presentation adapters.
     IDetectionConfigurationLoader loader = new JsonDetectionConfigurationLoader();
     var configuration = await loader.LoadAsync(configPath, cancellation.Token);

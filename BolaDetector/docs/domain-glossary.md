@@ -30,3 +30,6 @@ dokazi predstavljaju opaženo ponašanje. Klasifikator poredi te dvije strane.
 | Validirani snimak konfiguracije | Nepromjenljiv skup parametara, identiteta, operacija, resursa, pravila i zaštićenih polja za jedno izvršavanje | Application, `ValidatedDetectionConfiguration.Create`, `RunDetection`, portovi za generisanje i izvršavanje |
 | Artefakt reprodukcije | Predviđeni zapis sanitizovanih zahtjeva i preduslova | Model, `ReplayArtifact`. Trenutno nema izvršnog toka za ovaj tip. |
 | Testni dokument | Sintetički objekat zasebnog lokalnog REST API-ja | Testni API, `TestDocument`, `TestDocumentStore` |
+| Sekvenca dokumenata | Uređeni autorizovani koraci nad privremenim lokalnim dokumentima | Application, `DocumentSequence`, `DocumentStep` |
+| Logički resurs sekvence | Ime koje Create povezuje s generisanim ID-em u jednom izvršavanju | Application i Engine, `DocumentStep.Resource`, `DocumentSequenceExecutor` |
+| Ishod koraka sekvence | Uspjeh, greška, preskakanje ili otkazivanje | Application, `DocumentStepResult`, `SequenceStepOutcome` |

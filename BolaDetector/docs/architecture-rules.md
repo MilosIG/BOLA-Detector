@@ -51,6 +51,11 @@ izvornog koda ostaje usmjerena prema ugovoru.
 
 ## DI, testovi i obrasci
 
+Autorizovane sekvence koriste aplikacione portove za orkestraciju i lokalni
+CRUD. Engine drži kontekst izvršavanja unutar jednog poziva. Infrastructure
+prevodi fiksne CRUD operacije u HTTP i priprema tipizirano stanje dokumenta.
+[Model i politika čišćenja](implementation-v4-multi-step-sequences.md).
+
 - Koristi konstruktorsko ubrizgavanje za saradnike. Razrješavanje servisa
   pripada composition root-u. Singleton zahtijeva bezbjednu konkurentnu
   upotrebu, a EF kontekst i njegov čitač imaju scoped životni vijek.

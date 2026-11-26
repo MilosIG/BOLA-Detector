@@ -6,6 +6,16 @@ namespace BolaDetector.Infrastructure;
 
 public static class DetectionServiceCollectionExtensions
 {
+    public static IServiceCollection AddLocalDocumentSequences(this IServiceCollection services)
+    {
+        services.TryAddSingleton<LocalTargetAddressPolicy>();
+        services.TryAddSingleton<ITestCredentialProvider, EnvironmentTestCredentialProvider>();
+        services.AddTransient<IDocumentSequenceExecutor, DocumentSequenceExecutor>();
+        services.AddHttpClient<IOwnedDocumentClient, LocalOwnedDocumentClient>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false, UseCookies = false });
+        return services;
+    }
+
     public static IServiceCollection AddBolaDetection(this IServiceCollection services)
     {
         services.TryAddSingleton(TimeProvider.System);

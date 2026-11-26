@@ -68,6 +68,19 @@ Invoke-RestMethod -Method Delete -Uri $uri -Headers $headers
 CRUD dokumenti postoje u memoriji do brisanja ili ponovnog pokretanja API-ja.
 Rute Read demonstracije koriste zasebne početne dokumente `doc-1` i `doc-2`.
 
+### Autorizovana sekvenca dokumenata
+
+Uz pokrenut lokalni API i postavljen `ALICE_TEST_USER=alice`:
+
+```powershell
+dotnet run --project src/BolaDetector.Demo -- --document-sequence configs/demo-detection.json
+```
+
+Demo prikazuje JSON rezultate kreiranja, čitanja, provjere stanja, izmjene,
+brisanja i potvrde odsustva privremenog dokumenta. Izlazni kodovi su `0` za
+uspjeh, `1` za grešku i `130` za otkazivanje.
+[Model, pravila izvršavanja i testovi](docs/implementation-v4-multi-step-sequences.md).
+
 ## Raspored projekta
 
 ```text

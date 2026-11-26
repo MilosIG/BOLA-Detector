@@ -18,6 +18,53 @@ public class LocalRegressionTests
     public void RemoveTemporaryWorkspace() => workspace.Delete(recursive: true);
 
     [Test]
+    public async Task Demo_WhenDocumentSequenceIsSelected_ReportsLifecycleAndLeavesNoDocument()
+    {
+        await using var api = await LocalApiProcess.StartAsync(workspace.FullName, 5081);
+        await using var demo = await TestProcess.StartAsync("src", "BolaDetector.Demo", workspace.FullName,
+            ["--document-sequence"], new Dictionary<string, string> { ["ALICE_TEST_USER"] = "alice" });
+
+        var exitCode = await demo.WaitForExitAsync();
+
+        Assert.That(exitCode, Is.Zero, demo.Diagnostics);
+        Assert.That(demo.StandardError, Is.Empty, demo.Diagnostics);
+        using var output = JsonDocument.Parse(demo.StandardOutput);
+        var result = output.RootElement;
+        Assert.That(result.GetProperty("Succeeded").GetBoolean(), Is.True);
+        var steps = result.GetProperty("Steps").EnumerateArray().ToArray();
+        Assert.That(steps.Select(step => step.GetProperty("StepId").GetString()), Is.EqualTo(new[]
+        {
+            "create", "read-initial", "verify-initial", "update", "read-updated", "verify-updated", "delete", "verify-deleted"
+        }));
+        Assert.That(steps.Select(step => step.GetProperty("Outcome").GetString()), Is.All.EqualTo("Succeeded"));
+        var id = steps[0].GetProperty("DocumentId").GetGuid();
+        Assert.That(id, Is.Not.EqualTo(Guid.Empty));
+        Assert.That(steps.Select(step => step.GetProperty("DocumentId").GetGuid()), Is.All.EqualTo(id));
+        Assert.That(result.GetProperty("Cleanup").GetArrayLength(), Is.Zero);
+        api.Client.DefaultRequestHeaders.Add("X-Test-User", "alice");
+        using var missing = await api.Client.GetAsync($"/documents/{id:N}");
+        Assert.That(missing.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(Directory.EnumerateFileSystemEntries(workspace.FullName), Is.Empty);
+    }
+
+    [Test]
+    public async Task Demo_WhenUsingDefaultReadConfiguration_PreservesVerdictCounts()
+    {
+        await using var api = await LocalApiProcess.StartAsync(workspace.FullName, 5081);
+        await using var demo = await TestProcess.StartAsync("src", "BolaDetector.Demo", workspace.FullName, [],
+            new Dictionary<string, string> { ["ALICE_TEST_USER"] = "alice", ["BOB_TEST_USER"] = "bob" });
+
+        var exitCode = await demo.WaitForExitAsync();
+
+        Assert.That(exitCode, Is.Zero, demo.Diagnostics);
+        using var output = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(workspace.FullName, "bola-report.json")));
+        var verdicts = output.RootElement.GetProperty("Results").EnumerateArray()
+            .Select(result => result.GetProperty("Verdict").GetString()).ToArray();
+        Assert.That(verdicts, Is.EquivalentTo(Enumerable.Repeat("NoViolationObserved", 6)
+            .Concat(Enumerable.Repeat("ConfirmedViolation", 2))));
+    }
+
+    [Test]
     public async Task Documents_WhenOwnerUsesCrud_CompletesTheResourceLifecycle()
     {
         await using var api = await LocalApiProcess.StartAsync(workspace.FullName);
